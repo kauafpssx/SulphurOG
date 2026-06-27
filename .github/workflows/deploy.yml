@@ -32,15 +32,15 @@ jobs:
           echo "$SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
 
-          # Upload binário
-          scp -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            sulphurog $USER@$HOST:~/SulphurOG/sulphurog
+          SCP="scp -i /tmp/deploy_key -o StrictHostKeyChecking=no"
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no $USER@$HOST"
 
-          # Reinicia container
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            $USER@$HOST \
-            "cd /home/ubuntu/SulphurOG && docker compose -f /home/ubuntu/SulphurOG/docker-compose.yml restart"
+          # Garante diretório e configs no servidor
+          $SSH "mkdir -p /home/ubuntu/SulphurOG/data"
+          $SCP docker-compose.yml Dockerfile $USER@$HOST:/home/ubuntu/SulphurOG/
+          $SCP sulphurog $USER@$HOST:/home/ubuntu/SulphurOG/sulphurog
+
+          # Sobe (ou recria) container
+          $SSH "cd /home/ubuntu/SulphurOG && docker compose up -d --build"
 
           rm -f /tmp/deploy_key
