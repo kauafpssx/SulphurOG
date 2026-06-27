@@ -41,6 +41,6 @@ jobs:
           ssh -i /tmp/deploy_key \
             -o StrictHostKeyChecking=no \
             $USER@$HOST \
-            "cd ~/SulphurOG && docker compose restart"
+            "cd /home/ubuntu/SulphurOG && docker compose -f /home/ubuntu/SulphurOG/docker-compose.yml restart"
 
           rm -f /tmp/deploy_key
