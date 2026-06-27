@@ -1,0 +1,201 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_source": "insomnia.desktop",
+  "__export_date": "2026-06-26T23:10:00.000Z",
+  "resources": [
+    {
+      "_type": "workspace",
+      "_id": "wrk_sulphurog",
+      "name": "SulphurOG API",
+      "description": "Telegram Stealer Log Processor",
+      "parentId": null
+    },
+    {
+      "_type": "environment",
+      "_id": "env_sulphurog",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:8090",
+        "api_key": "teste"
+      },
+      "parentId": "wrk_sulphurog"
+    },
+    {
+      "_type": "request_group",
+      "_id": "fld_system",
+      "name": "System",
+      "parentId": "wrk_sulphurog"
+    },
+    {
+      "_type": "request_group",
+      "_id": "fld_groups",
+      "name": "Groups",
+      "parentId": "wrk_sulphurog"
+    },
+    {
+      "_type": "request",
+      "_id": "req_health",
+      "name": "Health Check",
+      "method": "GET",
+      "url": "{{ base_url }}/api/health",
+      "headers": [],
+      "parentId": "fld_system"
+    },
+    {
+      "_type": "request",
+      "_id": "req_status",
+      "name": "System Status",
+      "method": "GET",
+      "url": "{{ base_url }}/api/status",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_system"
+    },
+    {
+      "_type": "request",
+      "_id": "req_list_groups",
+      "name": "List All Groups",
+      "method": "GET",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_create_group",
+      "name": "Create Group",
+      "method": "POST",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"identifier\": \"https://t.me/darkside_hubb\",\n  \"name\": \"DarkSide Hubb\"\n}"
+      },
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_create_group_username",
+      "name": "Create Group (@username)",
+      "method": "POST",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"identifier\": \"@SlurmDataBase\",\n  \"name\": \"Slurm DataBase\"\n}"
+      },
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_create_group_invite",
+      "name": "Create Group (Invite Link)",
+      "method": "POST",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"identifier\": \"https://t.me/+OX9yTn1Tzy1mNDIy\",\n  \"name\": \"Invite Channel\"\n}"
+      },
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_get_group",
+      "name": "Get Group by ID",
+      "method": "GET",
+      "url": "{{ base_url }}/api/groups/{{ group_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_update_group",
+      "name": "Update Group",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/groups/{{ group_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Updated Name\",\n  \"active\": true\n}"
+      },
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_mark_dead",
+      "name": "Mark Group as Dead",
+      "method": "PUT",
+      "url": "{{ base_url }}/api/groups/{{ group_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dead\": true,\n  \"active\": false\n}"
+      },
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_delete_group",
+      "name": "Delete Group",
+      "method": "DELETE",
+      "url": "{{ base_url }}/api/groups/{{ group_id }}",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_health_group",
+      "name": "Group Health Check",
+      "method": "GET",
+      "url": "{{ base_url }}/api/groups/{{ group_id }}/health",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_no_auth",
+      "name": "Test: No API Key (should 401)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [],
+      "parentId": "fld_groups"
+    },
+    {
+      "_type": "request",
+      "_id": "req_wrong_auth",
+      "name": "Test: Wrong API Key (should 401)",
+      "method": "GET",
+      "url": "{{ base_url }}/api/groups",
+      "headers": [
+        { "name": "X-API-Key", "value": "wrong-key" }
+      ],
+      "parentId": "fld_groups"
+    }
+  ]
+}

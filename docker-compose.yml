@@ -1,0 +1,18 @@
+services:
+  sulphurog:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    env_file:
+      - .env
+    user: root
+    command: /bin/sh -c "chmod +x /app/sulphurog && exec /app/sulphurog"
+    volumes:
+      - ./data:/app/data
+      - ./sulphurog:/app/sulphurog
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"

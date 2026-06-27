@@ -1,0 +1,298 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "SulphurOG API",
+    "description": "Telegram Stealer Log Processor API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8090",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health check da API",
+        "tags": ["System"],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "API esta funcionando",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Status geral do sistema",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Status do sistema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups_total": { "type": "integer", "example": 4 },
+                    "groups_active": { "type": "integer", "example": 3 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/groups": {
+      "get": {
+        "summary": "Listar todos os grupos",
+        "tags": ["Groups"],
+        "responses": {
+          "200": {
+            "description": "Lista de grupos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Group" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Criar novo grupo",
+        "tags": ["Groups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["identifier"],
+                "properties": {
+                  "identifier": {
+                    "type": "string",
+                    "description": "URL, @username, ou invite link",
+                    "example": "https://t.me/darkside_hubb"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Nome amigavel do grupo",
+                    "example": "DarkSide Hubb"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Grupo criado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Group" }
+              }
+            }
+          },
+          "400": {
+            "description": "Erro de validacao",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/groups/{id}": {
+      "get": {
+        "summary": "Buscar grupo por ID",
+        "tags": ["Groups"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grupo encontrado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Group" }
+              }
+            }
+          },
+          "404": {
+            "description": "Grupo nao encontrado"
+          }
+        }
+      },
+      "put": {
+        "summary": "Atualizar grupo",
+        "tags": ["Groups"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "identifier": { "type": "string" },
+                  "name": { "type": "string" },
+                  "active": { "type": "boolean" },
+                  "dead": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Grupo atualizado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Group" }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remover grupo",
+        "tags": ["Groups"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grupo removido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/groups/{id}/health": {
+      "get": {
+        "summary": "Health check de um grupo",
+        "tags": ["Groups"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status do grupo",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GroupHealth" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      }
+    },
+    "schemas": {
+      "Group": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "41755c9f" },
+          "identifier": { "type": "string", "example": "https://t.me/darkside_hubb" },
+          "channel_name": { "type": "string", "example": "darkside_hubb" },
+          "channel_id": { "type": "integer", "example": 3201238801 },
+          "access_hash": { "type": "integer", "example": 7873253089742877227 },
+          "name": { "type": "string", "example": "DarkSide Hubb" },
+          "active": { "type": "boolean", "example": true },
+          "dead": { "type": "boolean", "example": false },
+          "validated": { "type": "boolean", "example": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "GroupHealth": {
+        "type": "object",
+        "properties": {
+          "active": { "type": "boolean" },
+          "dead": { "type": "boolean" },
+          "validated": { "type": "boolean" },
+          "channel_id": { "type": "integer" },
+          "channel_name": { "type": "string" },
+          "last_message_id": { "type": "integer" },
+          "last_message_date": { "type": "string", "format": "date-time" },
+          "total_downloaded": { "type": "integer" },
+          "total_failed": { "type": "integer" },
+          "last_check": { "type": "string", "format": "date-time" },
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}

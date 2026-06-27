@@ -1,0 +1,46 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Linux binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -ldflags="-s -w" -o sulphurog ./cmd/sulphurog
+
+      - name: Deploy to server
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.SERVER_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+          # Upload binário
+          scp -i /tmp/deploy_key \
+            -o StrictHostKeyChecking=no \
+            sulphurog $USER@$HOST:~/SulphurOG/sulphurog
+
+          # Reinicia container
+          ssh -i /tmp/deploy_key \
+            -o StrictHostKeyChecking=no \
+            $USER@$HOST \
+            "cd ~/SulphurOG && docker compose restart"
+
+          rm -f /tmp/deploy_key

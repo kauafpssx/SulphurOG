@@ -1,0 +1,25 @@
+# Binaries
+*.exe
+bin/
+
+# Temp
+tmp/
+*.tmp
+
+# Data (sensive)
+data/
+*.key
+.env
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+sulphurog

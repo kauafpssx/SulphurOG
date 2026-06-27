@@ -1,0 +1,26 @@
+api:
+  port: 8090
+  api_key: ${API_KEY}
+
+telegram:
+  api_id: ${TG_API_ID}
+  api_hash: ${TG_API_HASH}
+  phone: ${TG_PHONE}
+  session_file: data/session.json
+  channels: []
+
+supabase:
+  url: ${SUPABASE_URL}
+  anon_key: ${SUPABASE_ANON_KEY}
+  service_role_key: ${SUPABASE_SERVICE_ROLE_KEY}
+  bucket: ${SUPABASE_BUCKET}
+
+processing:
+  temp_dir: /tmp/sulphurog
+  part_size_kb: 512
+  max_retries: 3
+  poll_interval: 30s
+  threads: 16
+
+logging:
+  level: info
