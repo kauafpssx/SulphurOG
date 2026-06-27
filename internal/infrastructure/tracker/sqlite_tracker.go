@@ -348,6 +348,17 @@ func (t *SQLiteTracker) RemovePendingByGroup(groupID string) error {
 	return err
 }
 
+func (t *SQLiteTracker) IsDuplicateFile(filename string, fileSize int64) (bool, error) {
+	var count int
+	err := t.db.QueryRow(`
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM pending_files WHERE filename = ? AND file_size = ?
+			UNION ALL
+			SELECT 1 FROM downloaded_files WHERE filename = ? AND file_size = ? AND status = 'finished'
+		)`, filename, fileSize, filename, fileSize).Scan(&count)
+	return count > 0, err
+}
+
 func (t *SQLiteTracker) GetStats() (downloading, finished, failed, pending int, err error) {
 	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status IN ('downloading','downloaded','uploading')`).Scan(&downloading)
 	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'finished'`).Scan(&finished)

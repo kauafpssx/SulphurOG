@@ -57,7 +57,7 @@ func (p *StealerParser) parseYAMLFormat(content string) []domain.ULP {
 			val := strings.TrimPrefix(strings.TrimPrefix(line, "password:"), "Password:")
 			currentPassword = strings.TrimSpace(val)
 
-			if currentURL != "" && currentPassword != "" {
+			if currentURL != "" && currentPassword != "" && !isJunkURL(currentURL) {
 				login := currentLogin
 				if login == "" {
 					login = "_"
@@ -88,7 +88,7 @@ func (p *StealerParser) parseKeyValueFormat(content string) []domain.ULP {
 
 		// Separador ----- ou linha vazia
 		if strings.HasPrefix(line, "-----") || (line == "" && currentURL != "") {
-			if currentURL != "" && currentPassword != "" {
+			if currentURL != "" && currentPassword != "" && !isJunkURL(currentURL) {
 				login := currentLogin
 				if login == "" {
 					login = "_"
@@ -116,7 +116,7 @@ func (p *StealerParser) parseKeyValueFormat(content string) []domain.ULP {
 	}
 
 	// Ultimo bloco
-	if currentURL != "" && currentPassword != "" {
+	if currentURL != "" && currentPassword != "" && !isJunkURL(currentURL) {
 		login := currentLogin
 		if login == "" {
 			login = "_"
@@ -163,6 +163,22 @@ func (p *StealerParser) IsULPFormat(content []byte) bool {
 	return false
 }
 
+func isJunkURL(url string) bool {
+	u := strings.ToLower(url)
+	for _, prefix := range []string{
+		"https://accounts.google.com/interactivelogin",
+		"https://accounts.google.com/v3/signin/",
+		"https://accounts.google.com/signin/",
+		"https://accounts.google.com/servicelogin",
+		"https://accounts.google.com/o/oauth2/",
+	} {
+		if strings.HasPrefix(u, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseULPLine(line string) (domain.ULP, bool) {
 	// Netscape cookie format usa tabs
 	if strings.Contains(line, "\t") {
@@ -182,6 +198,10 @@ func parseULPLine(line string) (domain.ULP, bool) {
 
 	urlLower := strings.ToLower(url)
 	if !strings.HasPrefix(urlLower, "http://") && !strings.HasPrefix(urlLower, "https://") {
+		return domain.ULP{}, false
+	}
+
+	if isJunkURL(url) {
 		return domain.ULP{}, false
 	}
 

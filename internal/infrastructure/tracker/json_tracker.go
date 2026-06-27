@@ -264,6 +264,22 @@ func (t *JSONTracker) AddPending(files []domain.PendingFile) error {
 	return t.save()
 }
 
+func (t *JSONTracker) IsDuplicateFile(filename string, fileSize int64) (bool, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, p := range t.state.Pending {
+		if p.Filename == filename && p.FileSize == fileSize {
+			return true, nil
+		}
+	}
+	for _, r := range t.state.DownloadedFiles {
+		if r.Filename == filename && r.FileSize == fileSize && r.Status == domain.StatusFinished {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (t *JSONTracker) RemovePendingByGroup(groupID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
