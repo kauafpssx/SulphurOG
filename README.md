@@ -1,8 +1,8 @@
-# SulphurOG
+# 🔥 SulphurOG
 
 Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva no Supabase Storage.
 
-## O que faz
+## 🚀 O que faz
 
 - Conecta em canais via MTProto (conta real, sem bot)
 - Detecta arquivos novos a cada ciclo, enfileira e processa 10 por vez
@@ -14,7 +14,7 @@ Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva n
 - Deduplica por source URL e por `(filename, filesize)`
 - Reconnect automático com backoff exponencial (30s → 5min)
 
-## Arquitetura
+## 🏗️ Arquitetura
 
 Clean Architecture: `domain` → `usecase` → `infrastructure`.
 
@@ -30,7 +30,7 @@ Supabase Storage
 
 Estado persistido em SQLite (WAL). Grupos em `data/groups.json`. Sessão Telegram em `data/session.json`.
 
-## Configuração
+## ⚙️ Configuração
 
 ```bash
 cp .env.example .env
@@ -46,7 +46,7 @@ SUPABASE_BUCKET=logs
 API_KEY=                # autenticação da API REST
 ```
 
-## Deploy
+## 🐳 Deploy
 
 O CI/CD (GitHub Actions) builda o binário Linux, copia configs e sobe o container automaticamente em cada push para `main`.
 
@@ -71,7 +71,7 @@ Na primeira execução o app pede o código de verificação do Telegram no term
 | `SERVER_HOST` | IP ou hostname do servidor |
 | `SERVER_USER` | Usuário SSH (ex: `ubuntu`) |
 
-## Desenvolvimento local
+## 🖥️ Desenvolvimento local
 
 Requer Go 1.21+.
 
@@ -82,7 +82,7 @@ go vet ./...
 go mod tidy
 ```
 
-## API REST
+## 🌐 API REST
 
 Todas as rotas exigem `X-API-Key: <sua_key>`, exceto `/api/health`.
 
@@ -107,7 +107,7 @@ curl -X POST http://servidor:8090/api/groups \
 
 Aceita username (`https://t.me/canal`) e invite link (`https://t.me/+hash`).
 
-## Estrutura no Supabase
+## 📁 Estrutura no Supabase
 
 ```
 {YYYY-MM-DD_HH-MM-SS}/
@@ -118,7 +118,7 @@ Aceita username (`https://t.me/canal`) e invite link (`https://t.me/+hash`).
     └── 2/Firefox_Default.txt
 ```
 
-## Variáveis de ambiente
+## 🔒 Variáveis de ambiente
 
 | Variável | Descrição |
 |----------|-----------|
@@ -130,7 +130,7 @@ Aceita username (`https://t.me/canal`) e invite link (`https://t.me/+hash`).
 | `SUPABASE_BUCKET` | Nome do bucket |
 | `API_KEY` | Chave de autenticação da API |
 
-## Stack
+## 🛠️ Stack
 
 - **Go 1.21+** — binário estático, CGO_ENABLED=0
 - **gotd/td** — cliente MTProto nativo
