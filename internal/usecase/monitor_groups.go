@@ -89,9 +89,9 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 			time.Sleep(5 * time.Second)
 		}
 
-		// Fase 2: processa fila global 1 arquivo por vez (mais recente primeiro)
+		// Fase 2: processa até 10 arquivos por ciclo, depois volta pro Phase 1
 		processed := 0
-		for {
+		for processed < 10 {
 			select {
 			case <-ctx.Done():
 				return
