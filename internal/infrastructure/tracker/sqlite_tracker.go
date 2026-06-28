@@ -78,6 +78,8 @@ func (t *SQLiteTracker) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_pending_priority ON pending_files(priority ASC, date DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_downloaded_status ON downloaded_files(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_pending_group ON pending_files(group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_pending_filename_size ON pending_files(filename, file_size)`,
+		`CREATE INDEX IF NOT EXISTS idx_downloaded_filename_size ON downloaded_files(filename, file_size)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := t.db.Exec(stmt); err != nil {

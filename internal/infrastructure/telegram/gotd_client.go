@@ -174,7 +174,8 @@ func (c *GotdClient) ResolveChannel(identifier string) (bool, int64, int64, erro
 }
 
 func (c *GotdClient) resolveInvite(api *tg.Client, hash string) (bool, int64, int64, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	checkResp, err := api.MessagesCheckChatInvite(ctx, hash)
 	if err == nil {
@@ -237,6 +238,9 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 		fileLoc := d.AsInputDocumentFileLocation("")
 		cacheKey := fmt.Sprintf("%d_%d", channelID, msg.ID)
 		c.fileLocMu.Lock()
+		if len(c.fileLocations) > 500 {
+			c.fileLocations = make(map[string]*tg.InputDocumentFileLocation)
+		}
 		c.fileLocations[cacheKey] = fileLoc
 		c.fileLocMu.Unlock()
 		result = append(result, domain.LogFile{
@@ -280,17 +284,16 @@ func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, des
 	startTime := time.Now()
 	done := make(chan struct{})
 	go c.monitorProgress(destPath, totalSize, startTime, done)
+	defer close(done)
 
 	_, err := c.dl.Download(api, loc).WithThreads(c.threads).ToPath(ctx, destPath)
-	close(done)
-
 	if err != nil {
 		return 0, err
 	}
 
 	info, err := os.Stat(destPath)
 	if err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("stat after download: %w", err)
 	}
 
 	elapsed := time.Since(startTime).Seconds()
@@ -452,7 +455,7 @@ func extractPasswordFromMessage(text string) string {
 }
 
 func isFloodWait(err error) bool {
-	return strings.Contains(err.Error(), "FLOOD_WAIT")
+	return FloodWaitDuration(err) > 0
 }
 
 // IsChannelError detecta erros que indicam canal deletado/privado/inacessível.

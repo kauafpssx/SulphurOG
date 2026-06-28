@@ -18,12 +18,13 @@ const (
 )
 
 type MonitorGroupsUseCase struct {
-	telegram   domain.TelegramClient
-	processor  *ProcessFileUseCase
-	groups     domain.GroupRepository
-	tracker    domain.Tracker
-	log        zerolog.Logger
-	cycleCount int
+	telegram    domain.TelegramClient
+	processor   *ProcessFileUseCase
+	groups      domain.GroupRepository
+	tracker     domain.Tracker
+	log         zerolog.Logger
+	cycleCount  int
+	groupsCache []domain.Group
 }
 
 func NewMonitorGroupsUseCase(
@@ -66,6 +67,7 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 			time.Sleep(30 * time.Second)
 			continue
 		}
+		uc.groupsCache = allGroups
 
 		// Validação periódica de grupos vivos
 		if uc.cycleCount%groupValidationInterval == 1 {
@@ -187,13 +189,19 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	// Histórico
 	time.Sleep(2 * time.Second)
 	if groupState.OldestMessageID > 0 {
-		histFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, groupState.OldestMessageID)
-		if err != nil {
-			if wait := tgclient.FloodWaitDuration(err); wait > 0 {
-				log.Warn().Dur("wait", wait).Msg("FLOOD_WAIT on historical fetch, waiting...")
-				time.Sleep(wait)
-				histFiles, err = uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, groupState.OldestMessageID)
+		var histFiles []domain.LogFile
+		var err error
+		for attempt := 0; attempt < 3; attempt++ {
+			histFiles, err = uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, groupState.OldestMessageID)
+			if err == nil {
+				break
 			}
+			if wait := tgclient.FloodWaitDuration(err); wait > 0 {
+				log.Warn().Dur("wait", wait).Int("attempt", attempt+1).Msg("FLOOD_WAIT on historical fetch, waiting...")
+				time.Sleep(wait)
+				continue
+			}
+			break
 		}
 		if err != nil {
 			log.Warn().Err(err).Msg("failed to list historical files, skipping")
@@ -342,15 +350,11 @@ func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize
 	return false
 }
 
-// groupByIdentifier busca grupo pelo identifier (URL).
+// groupByIdentifier busca grupo no cache (atualizado a cada ciclo).
 func (uc *MonitorGroupsUseCase) groupByIdentifier(identifier string) *domain.Group {
-	groups, err := uc.groups.GetAll()
-	if err != nil {
-		return nil
-	}
-	for i := range groups {
-		if groups[i].Identifier == identifier {
-			return &groups[i]
+	for i := range uc.groupsCache {
+		if uc.groupsCache[i].Identifier == identifier {
+			return &uc.groupsCache[i]
 		}
 	}
 	return nil

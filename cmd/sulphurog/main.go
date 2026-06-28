@@ -79,13 +79,22 @@ func main() {
 		)
 
 		go func() {
+			backoff := 30 * time.Second
 			for {
 				log.Info().Msg("connecting to Telegram...")
-				if err := tg.Connect(context.Background()); err != nil {
-					log.Error().Err(err).Msg("telegram disconnected")
+				start := time.Now()
+				err := tg.Connect(context.Background())
+				if time.Since(start) > time.Minute {
+					backoff = 30 * time.Second
 				}
-				log.Warn().Msg("telegram reconnecting in 30s...")
-				time.Sleep(30 * time.Second)
+				if err != nil {
+					log.Error().Err(err).Dur("retry_in", backoff).Msg("telegram disconnected")
+				}
+				log.Warn().Dur("retry_in", backoff).Msg("telegram reconnecting...")
+				time.Sleep(backoff)
+				if backoff < 5*time.Minute {
+					backoff *= 2
+				}
 			}
 		}()
 

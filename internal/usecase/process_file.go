@@ -284,16 +284,21 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 }
 
 func (uc *ProcessFileUseCase) extractNested(dir, password string) {
+	// Coleta archives primeiro, depois extrai — evita modificar dir durante Walk
+	var archives []string
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
 		lower := strings.ToLower(info.Name())
-		if !strings.HasSuffix(lower, ".zip") && !strings.HasSuffix(lower, ".rar") &&
-			!strings.HasSuffix(lower, ".7z") && !strings.HasSuffix(lower, ".gz") {
-			return nil
+		if strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".rar") ||
+			strings.HasSuffix(lower, ".7z") || strings.HasSuffix(lower, ".gz") {
+			archives = append(archives, path)
 		}
+		return nil
+	})
 
+	for _, path := range archives {
 		nestedDir := path + "_extracted"
 		os.MkdirAll(nestedDir, 0755)
 
@@ -317,8 +322,7 @@ func (uc *ProcessFileUseCase) extractNested(dir, password string) {
 			})
 		}
 		os.RemoveAll(nestedDir)
-		return nil
-	})
+	}
 }
 
 func (uc *ProcessFileUseCase) failDownload(contentHash string, err error) error {
@@ -362,16 +366,19 @@ func (uc *ProcessFileUseCase) detectFileType(filePath string) string {
 func deduplicateLines(content string) string {
 	seen := make(map[string]struct{})
 	var b strings.Builder
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
+	start := 0
+	for i := 0; i <= len(content); i++ {
+		if i == len(content) || content[i] == '\n' {
+			line := strings.TrimSpace(content[start:i])
+			start = i + 1
+			if line == "" {
+				continue
+			}
+			if _, dup := seen[line]; !dup {
+				seen[line] = struct{}{}
+				b.WriteString(line + "\n")
+			}
 		}
-		if _, dup := seen[trimmed]; dup {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		b.WriteString(trimmed + "\n")
 	}
 	return b.String()
 }

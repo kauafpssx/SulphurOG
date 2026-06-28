@@ -8,6 +8,8 @@ import (
 	"github.com/sulphurog/sulphurog/internal/domain"
 )
 
+const scannerBufSize = 1 << 20 // 1MB — evita truncamento de linhas longas
+
 type StealerParser struct{}
 
 func NewStealerParser() *StealerParser {
@@ -40,6 +42,7 @@ func (p *StealerParser) parseYAMLFormat(content string) []domain.ULP {
 	var currentURL, currentLogin, currentPassword string
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
+	scanner.Buffer(make([]byte, scannerBufSize), scannerBufSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -83,6 +86,7 @@ func (p *StealerParser) parseKeyValueFormat(content string) []domain.ULP {
 	var currentURL, currentLogin, currentPassword string
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
+	scanner.Buffer(make([]byte, scannerBufSize), scannerBufSize)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
@@ -209,6 +213,10 @@ func parseULPLine(line string) (domain.ULP, bool) {
 		return domain.ULP{}, false
 	}
 
+	if isPortNumber(login) {
+		return domain.ULP{}, false
+	}
+
 	for _, inv := range []string{"None", "none", "null", "N/A"} {
 		if password == inv || login == inv {
 			return domain.ULP{}, false
@@ -225,6 +233,7 @@ var rePass = regexp.MustCompile(`(?i)^password:\s*(.+)`)
 func stripASCIIHeaders(content string) string {
 	var result strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(content))
+	scanner.Buffer(make([]byte, scannerBufSize), scannerBufSize)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if isASCIIArt(line) || isDecorativeLine(line) || isOnlySymbols(line) {
@@ -274,4 +283,18 @@ func isOnlySymbols(line string) bool {
 		}
 	}
 	return true
+}
+
+func isPortNumber(s string) bool {
+	if len(s) == 0 || len(s) > 5 {
+		return false
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n >= 1 && n <= 65535
 }
