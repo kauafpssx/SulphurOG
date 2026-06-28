@@ -37,9 +37,14 @@ jobs:
 
           # Garante diretório no servidor
           $SSH "mkdir -p /home/ubuntu/SulphurOG/configs /home/ubuntu/SulphurOG/data"
+
+          # Para container antes de sobrescrever o binário (evita erro de permissão)
+          $SSH "cd /home/ubuntu/SulphurOG && docker compose down || true"
+
           $SCP docker-compose.yml Dockerfile $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP -r configs/ $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP sulphurog $USER@$HOST:/home/ubuntu/SulphurOG/sulphurog
+          $SSH "chmod +x /home/ubuntu/SulphurOG/sulphurog"
 
           # Sobe (ou recria) container
           $SSH "cd /home/ubuntu/SulphurOG && docker compose up -d --build"
