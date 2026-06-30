@@ -270,7 +270,7 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 	// Resolver file location do cache
 	var fileLocation interface{}
 	if provider, ok := uc.telegram.(FileLocationProvider); ok {
-		cacheKey := fmt.Sprintf("%d_%d", group.ChannelID, file.MessageID)
+		cacheKey := fmt.Sprintf("%d_%d_%s", group.ChannelID, file.MessageID, file.FileID)
 		if loc, found := provider.GetFileLocation(cacheKey); found {
 			fileLocation = loc
 		} else {
@@ -278,7 +278,7 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 			msgs, fetchErr := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 5, file.MessageID+1)
 			if fetchErr == nil {
 				for _, m := range msgs {
-					if m.MessageID == file.MessageID && m.FileLocation != nil {
+					if m.MessageID == file.MessageID && m.FileID == file.FileID && m.FileLocation != nil {
 						fileLocation = m.FileLocation
 						break
 					}
