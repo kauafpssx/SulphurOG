@@ -104,6 +104,11 @@
                     "type": "string",
                     "description": "Nome amigavel do grupo",
                     "example": "DarkSide Hubb"
+                  },
+                  "ignore_without_password": {
+                    "type": "boolean",
+                    "description": "Se true, nao pula arquivos sem senha",
+                    "example": false
                   }
                 }
               }
@@ -182,7 +187,8 @@
                   "identifier": { "type": "string" },
                   "name": { "type": "string" },
                   "active": { "type": "boolean" },
-                  "dead": { "type": "boolean" }
+                  "dead": { "type": "boolean" },
+                  "ignore_without_password": { "type": "boolean" }
                 }
               }
             }
@@ -274,7 +280,8 @@
           "dead": { "type": "boolean", "example": false },
           "validated": { "type": "boolean", "example": true },
           "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "updated_at": { "type": "string", "format": "date-time" },
+          "ignore_without_password": { "type": "boolean", "example": false }
         }
       },
       "GroupHealth": {

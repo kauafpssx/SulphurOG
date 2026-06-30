@@ -35,7 +35,7 @@ func (uc *ManageGroupsUseCase) GetGroup(id string) (*domain.Group, error) {
 	return uc.groups.GetByID(id)
 }
 
-func (uc *ManageGroupsUseCase) CreateGroup(identifier string, name string) (*domain.Group, error) {
+func (uc *ManageGroupsUseCase) CreateGroup(identifier string, name string, ignoreWithoutPassword bool) (*domain.Group, error) {
 	normalized, channelName, err := domain.NormalizeIdentifier(identifier)
 	if err != nil {
 		return nil, err
@@ -50,12 +50,13 @@ func (uc *ManageGroupsUseCase) CreateGroup(identifier string, name string) (*dom
 	}
 
 	group := &domain.Group{
-		ID:          uuid.New().String()[:8],
-		Identifier:  normalized,
-		ChannelName: channelName,
-		Name:        name,
-		Active:      true,
-		Validated:   false,
+		ID:                   uuid.New().String()[:8],
+		Identifier:           normalized,
+		ChannelName:          channelName,
+		Name:                 name,
+		Active:               true,
+		Validated:            false,
+		IgnoreWithoutPassword: ignoreWithoutPassword,
 	}
 
 	// Se telegram client existe e esta pronto, validar o canal
@@ -80,7 +81,7 @@ func (uc *ManageGroupsUseCase) CreateGroup(identifier string, name string) (*dom
 	return group, nil
 }
 
-func (uc *ManageGroupsUseCase) UpdateGroup(id string, identifier *string, name *string, active *bool, dead *bool) (*domain.Group, error) {
+func (uc *ManageGroupsUseCase) UpdateGroup(id string, identifier *string, name *string, active *bool, dead *bool, ignoreWithoutPassword *bool) (*domain.Group, error) {
 	group, err := uc.groups.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -117,6 +118,9 @@ func (uc *ManageGroupsUseCase) UpdateGroup(id string, identifier *string, name *
 		if *dead {
 			group.Active = false
 		}
+	}
+	if ignoreWithoutPassword != nil {
+		group.IgnoreWithoutPassword = *ignoreWithoutPassword
 	}
 
 	if err := uc.groups.Update(group); err != nil {

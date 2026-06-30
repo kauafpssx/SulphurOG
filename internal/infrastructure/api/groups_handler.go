@@ -41,8 +41,9 @@ func (h *GroupsHandler) Get(c *fiber.Ctx) error {
 }
 
 type CreateGroupRequest struct {
-	Identifier string `json:"identifier"`
-	Name       string `json:"name"`
+	Identifier            string `json:"identifier"`
+	Name                  string `json:"name"`
+	IgnoreWithoutPassword *bool  `json:"ignore_without_password,omitempty"`
 }
 
 func (h *GroupsHandler) Create(c *fiber.Ctx) error {
@@ -51,7 +52,12 @@ func (h *GroupsHandler) Create(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	group, err := h.uc.CreateGroup(req.Identifier, req.Name)
+	ignoreWithoutPassword := false
+	if req.IgnoreWithoutPassword != nil {
+		ignoreWithoutPassword = *req.IgnoreWithoutPassword
+	}
+
+	group, err := h.uc.CreateGroup(req.Identifier, req.Name, ignoreWithoutPassword)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -60,10 +66,11 @@ func (h *GroupsHandler) Create(c *fiber.Ctx) error {
 }
 
 type UpdateGroupRequest struct {
-	Identifier *string `json:"identifier,omitempty"`
-	Name       *string `json:"name,omitempty"`
-	Active     *bool   `json:"active,omitempty"`
-	Dead       *bool   `json:"dead,omitempty"`
+	Identifier            *string `json:"identifier,omitempty"`
+	Name                  *string `json:"name,omitempty"`
+	Active                *bool   `json:"active,omitempty"`
+	Dead                  *bool   `json:"dead,omitempty"`
+	IgnoreWithoutPassword *bool   `json:"ignore_without_password,omitempty"`
 }
 
 func (h *GroupsHandler) Update(c *fiber.Ctx) error {
@@ -74,7 +81,7 @@ func (h *GroupsHandler) Update(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	group, err := h.uc.UpdateGroup(id, req.Identifier, req.Name, req.Active, req.Dead)
+	group, err := h.uc.UpdateGroup(id, req.Identifier, req.Name, req.Active, req.Dead, req.IgnoreWithoutPassword)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}

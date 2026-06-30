@@ -155,7 +155,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
 
 	for _, f := range recentFiles {
-		if f.Password == "" {
+		if f.Password == "" && group.IgnoreWithoutPassword {
 			skipped++
 			continue
 		}
@@ -211,11 +211,11 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			log.Warn().Err(err).Msg("failed to list historical files, skipping")
 		} else {
 			log.Info().Int("count", len(histFiles)).Msg("historical files found")
-			for _, f := range histFiles {
-				if f.Password == "" {
-					skipped++
-					continue
-				}
+		for _, f := range histFiles {
+			if f.Password == "" && group.IgnoreWithoutPassword {
+				skipped++
+				continue
+			}
 				if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
 					log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
 					continue

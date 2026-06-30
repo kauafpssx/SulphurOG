@@ -18,8 +18,9 @@ type Group struct {
 	Active      bool      `json:"active"`
 	Dead        bool      `json:"dead"`
 	Validated   bool      `json:"validated"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
+	IgnoreWithoutPassword    bool      `json:"ignore_without_password"`
 }
 
 var (
