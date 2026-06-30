@@ -210,22 +210,27 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 
 	peer := &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash}
 	var result []domain.LogFile
+	var scanned, skippedNoMedia, skippedNotDoc, skippedEmpty int
 
 	iterator := query.Messages(api).GetHistory(peer)
 	if err := iterator.ForEach(ctx, func(ctx context.Context, elem messages.Elem) error {
 		if len(result) >= limit {
 			return fmt.Errorf("limit reached")
 		}
+		scanned++
 		msg, ok := elem.Msg.(*tg.Message)
 		if !ok || msg.Media == nil || beforeID > 0 && msg.ID >= beforeID {
+			skippedNoMedia++
 			return nil
 		}
 		doc, ok := msg.Media.(*tg.MessageMediaDocument)
 		if !ok {
+			skippedNotDoc++
 			return nil
 		}
 		d, ok := doc.Document.AsNotEmpty()
 		if !ok {
+			skippedEmpty++
 			return nil
 		}
 		filename := "unknown"
@@ -260,6 +265,15 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 	}); err != nil && err.Error() != "limit reached" {
 		return nil, err
 	}
+
+	c.log.Debug().
+		Int64("channel", channelID).
+		Int("scanned", scanned).
+		Int("found", len(result)).
+		Int("no_media", skippedNoMedia).
+		Int("not_doc", skippedNotDoc).
+		Int("empty_doc", skippedEmpty).
+		Msg("GetMessages scan summary")
 
 	return result, nil
 }

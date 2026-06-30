@@ -164,6 +164,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			return
 		}
 		if waitDur := tgclient.FloodWaitDuration(err); waitDur > 0 {
+			waitDur += 2 * time.Second
 			log.Warn().Dur("wait", waitDur).Msg("FLOOD_WAIT, sleeping before retry")
 			time.Sleep(waitDur)
 			recentFiles, err = uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
