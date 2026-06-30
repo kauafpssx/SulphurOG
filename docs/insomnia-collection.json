@@ -55,6 +55,17 @@
     },
     {
       "_type": "request",
+      "_id": "req_stats",
+      "name": "Detailed Stats",
+      "method": "GET",
+      "url": "{{ base_url }}/api/stats",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_system"
+    },
+    {
+      "_type": "request",
       "_id": "req_list_groups",
       "name": "List All Groups",
       "method": "GET",
@@ -82,24 +93,8 @@
     },
     {
       "_type": "request",
-      "_id": "req_create_group_username",
-      "name": "Create Group (@username)",
-      "method": "POST",
-      "url": "{{ base_url }}/api/groups",
-      "headers": [
-        { "name": "X-API-Key", "value": "{{ api_key }}" },
-        { "name": "Content-Type", "value": "application/json" }
-      ],
-      "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"identifier\": \"@SlurmDataBase\",\n  \"name\": \"Slurm DataBase\"\n}"
-      },
-      "parentId": "fld_groups"
-    },
-    {
-      "_type": "request",
       "_id": "req_create_group_invite",
-      "name": "Create Group (Invite Link)",
+      "name": "Create Group (Invite + Ignore Password)",
       "method": "POST",
       "url": "{{ base_url }}/api/groups",
       "headers": [
@@ -108,7 +103,7 @@
       ],
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"identifier\": \"https://t.me/+OX9yTn1Tzy1mNDIy\",\n  \"name\": \"Invite Channel\"\n}"
+        "text": "{\n  \"identifier\": \"https://t.me/+OX9yTn1Tzy1mNDIy\",\n  \"name\": \"Invite Channel\",\n  \"ignore_without_password\": true\n}"
       },
       "parentId": "fld_groups"
     },
@@ -196,6 +191,45 @@
         { "name": "X-API-Key", "value": "wrong-key" }
       ],
       "parentId": "fld_groups"
+    },
+    {
+      "_type": "request_group",
+      "_id": "fld_monitor",
+      "name": "Monitor",
+      "parentId": "wrk_sulphurog"
+    },
+    {
+      "_type": "request",
+      "_id": "req_monitor_status",
+      "name": "Monitor Status",
+      "method": "GET",
+      "url": "{{ base_url }}/api/monitor/status",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_monitor"
+    },
+    {
+      "_type": "request",
+      "_id": "req_monitor_start",
+      "name": "Start Monitor",
+      "method": "POST",
+      "url": "{{ base_url }}/api/monitor/start",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_monitor"
+    },
+    {
+      "_type": "request",
+      "_id": "req_monitor_pause",
+      "name": "Pause Monitor",
+      "method": "POST",
+      "url": "{{ base_url }}/api/monitor/pause",
+      "headers": [
+        { "name": "X-API-Key", "value": "{{ api_key }}" }
+      ],
+      "parentId": "fld_monitor"
     }
   ]
 }
