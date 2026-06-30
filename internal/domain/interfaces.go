@@ -11,7 +11,7 @@ type TelegramClient interface {
 	ResolveChannel(identifier string) (active bool, channelID int64, accessHash int64, err error)
 	GetMessages(ctx context.Context, channelID int64, accessHash int64, limit int, beforeID int) ([]LogFile, error)
 	ListFiles(ctx context.Context, channelID int64, accessHash int64, limit int, beforeID int) ([]LogFile, error)
-	DownloadFile(ctx context.Context, location interface{}, destPath string, totalSize int64) (int64, error)
+	DownloadFile(ctx context.Context, location interface{}, destPath string, totalSize int64, threads int) (int64, error)
 	GetChannelStatus(ctx context.Context, identifier string) (bool, int, time.Time, error)
 	Disconnect()
 }

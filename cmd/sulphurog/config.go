@@ -101,7 +101,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Processing.TempDir = "/tmp/sulphurog"
 	}
 	if cfg.Processing.PartSizeKB == 0 {
-		cfg.Processing.PartSizeKB = 512
+		cfg.Processing.PartSizeKB = 2048
 	}
 	if cfg.Processing.MaxRetries == 0 {
 		cfg.Processing.MaxRetries = 3

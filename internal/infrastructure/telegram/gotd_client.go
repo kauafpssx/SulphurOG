@@ -267,7 +267,7 @@ func (c *GotdClient) ListFiles(ctx context.Context, channelID int64, accessHash 
 	return c.GetMessages(ctx, channelID, accessHash, limit, beforeID)
 }
 
-func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, destPath string, totalSize int64) (int64, error) {
+func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, destPath string, totalSize int64, threads int) (int64, error) {
 	if err := c.waitForReady(ctx); err != nil {
 		return 0, err
 	}
@@ -281,12 +281,16 @@ func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, des
 		return 0, fmt.Errorf("invalid location: %T", location)
 	}
 
+	if threads <= 0 {
+		threads = c.threads
+	}
+
 	startTime := time.Now()
 	done := make(chan struct{})
 	go c.monitorProgress(destPath, totalSize, startTime, done)
 	defer close(done)
 
-	_, err := c.dl.Download(api, loc).WithThreads(c.threads).ToPath(ctx, destPath)
+	_, err := c.dl.Download(api, loc).WithThreads(threads).ToPath(ctx, destPath)
 	if err != nil {
 		return 0, err
 	}

@@ -150,13 +150,11 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 		groupState = &domain.GroupState{}
 	}
 
-	// Salva estado anterior para decidir se precisa buscar histórico
-	previousOldestID := groupState.OldestMessageID
-
 	var pending []domain.PendingFile
 	skipped := 0
+ isFirstRun := groupState.LastMessageID == 0
 
-	// Mensagens recentes
+	// Busca 10 mensagens mais recentes do grupo
 	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
 	if err != nil {
 		if tgclient.IsChannelError(err) {
@@ -171,6 +169,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
 
 	for _, f := range recentFiles {
+		// Filtros
 		if f.Password == "" && group.IgnoreWithoutPassword {
 			skipped++
 			continue
@@ -179,87 +178,53 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			skipped++
 			continue
 		}
-		if f.MessageID <= groupState.LastMessageID {
-			continue
+
+		// Primeiro run: adiciona todos (marca posição, não perde nada)
+		// Runs seguintes: só novos (mais recentes que último visto)
+		if isFirstRun {
+			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
+				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
+				continue
+			}
+			log.Info().Str("file", f.Filename).Msg("new file found")
+			pending = append(pending, domain.PendingFile{
+				MessageID: f.MessageID,
+				FileID:    f.FileID,
+				Source:    f.SourceURL,
+				Group:     group.Identifier,
+				Filename:  f.Filename,
+				FileSize:  f.FileSize,
+				Date:      f.Date,
+				Priority:  1,
+				Password:  f.Password,
+			})
+		} else {
+			if f.MessageID <= groupState.LastMessageID {
+				continue
+			}
+			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
+				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
+				continue
+			}
+			log.Info().Str("file", f.Filename).Msg("new file found")
+			pending = append(pending, domain.PendingFile{
+				MessageID: f.MessageID,
+				FileID:    f.FileID,
+				Source:    f.SourceURL,
+				Group:     group.Identifier,
+				Filename:  f.Filename,
+				FileSize:  f.FileSize,
+				Date:      f.Date,
+				Priority:  1,
+				Password:  f.Password,
+			})
 		}
-		if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
-			log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
-			continue
-		}
-		log.Info().Str("file", f.Filename).Msg("new file found")
-		pending = append(pending, domain.PendingFile{
-			MessageID: f.MessageID,
-			FileID:    f.FileID,
-			Source:    f.SourceURL,
-			Group:     group.Identifier,
-			Filename:  f.Filename,
-			FileSize:  f.FileSize,
-			Date:      f.Date,
-			Priority:  1,
-			Password:  f.Password,
-		})
 	}
 
+	// Atualiza LastMessageID com o ID mais alto retornado
 	for _, f := range recentFiles {
 		if f.MessageID > groupState.LastMessageID {
 			groupState.LastMessageID = f.MessageID
-		}
-		if groupState.OldestMessageID == 0 || f.MessageID < groupState.OldestMessageID {
-			groupState.OldestMessageID = f.MessageID
-		}
-	}
-
-	// Histórico: busca mais atrás apenas na primeira vez que vemos o grupo
-	// Grupos já rastreados só precisam dos recentes
-	time.Sleep(2 * time.Second)
-	if previousOldestID == 0 && groupState.OldestMessageID > 0 {
-		var histFiles []domain.LogFile
-		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			histFiles, err = uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, groupState.OldestMessageID)
-			if err == nil {
-				break
-			}
-			if wait := tgclient.FloodWaitDuration(err); wait > 0 {
-				log.Warn().Dur("wait", wait).Int("attempt", attempt+1).Msg("FLOOD_WAIT on historical fetch, waiting...")
-				time.Sleep(wait)
-				continue
-			}
-			break
-		}
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to list historical files, skipping")
-		} else {
-			log.Info().Int("count", len(histFiles)).Msg("historical files found")
-		for _, f := range histFiles {
-			if f.Password == "" && group.IgnoreWithoutPassword {
-				skipped++
-				continue
-			}
-			if !uc.isAllowedExtension(f.Filename) {
-				skipped++
-				continue
-			}
-				if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
-					log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
-					continue
-				}
-				log.Info().Str("file", f.Filename).Msg("historical file found")
-				pending = append(pending, domain.PendingFile{
-					MessageID: f.MessageID,
-					FileID:    f.FileID,
-					Source:    f.SourceURL,
-					Group:     group.Identifier,
-					Filename:  f.Filename,
-					FileSize:  f.FileSize,
-					Date:      f.Date,
-					Priority:  2,
-					Password:  f.Password,
-				})
-				if f.MessageID < groupState.OldestMessageID {
-					groupState.OldestMessageID = f.MessageID
-				}
-			}
 		}
 	}
 

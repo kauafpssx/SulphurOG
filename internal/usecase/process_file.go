@@ -89,31 +89,47 @@ func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) 
 	}()
 
 	if file.FileLocation != nil {
-		bytes, err := uc.telegram.DownloadFile(ctx, file.FileLocation, destPath, file.FileSize)
+		// Threads dinâmicas: arquivo pequeno = poucas threads, grande = mais
+		threads := uc.optimalThreads(file.FileSize)
+		bytes, err := uc.telegram.DownloadFile(ctx, file.FileLocation, destPath, file.FileSize, threads)
 		if err != nil {
 			return uc.failDownload(file.ContentHash, fmt.Errorf("download: %w", err))
 		}
-		log.Info().Int64("bytes", bytes).Msg("downloaded")
+		log.Info().Int64("bytes", bytes).Int("threads", threads).Msg("downloaded")
 		uc.tracker.MarkDownloadComplete(file.ContentHash)
 	} else {
 		return uc.failDownload(file.ContentHash, fmt.Errorf("no file location"))
 	}
 
-	content, err := os.ReadFile(destPath)
-	if err != nil {
-		return uc.failDownload(file.ContentHash, fmt.Errorf("read: %w", err))
-	}
-
+	// Detecta tipo lendo só 4 bytes do disco (não carrega o arquivo inteiro)
 	fileType := uc.detectFileType(destPath)
 	log.Info().Str("type", fileType).Msg("detected")
 
 	switch fileType {
 	case "text":
+		// Texto: lê na RAM pra parsear
+		content, err := os.ReadFile(destPath)
+		if err != nil {
+			return uc.failDownload(file.ContentHash, fmt.Errorf("read: %w", err))
+		}
 		return uc.processULP(ctx, file, content)
 	case "zip", "rar", "7z", "gz":
+		// Archive: extrai do disco direto, sem ler na RAM
 		return uc.processStealer(ctx, file, destPath)
 	default:
-		if isULPContent(content) {
+		// Desconhecido: lê só os primeiros 4KB pra checar se é ULP
+		header := make([]byte, 4096)
+		f, err := os.Open(destPath)
+		if err != nil {
+			return uc.failDownload(file.ContentHash, fmt.Errorf("open: %w", err))
+		}
+		n, _ := f.Read(header)
+		f.Close()
+		if isULPContent(header[:n]) {
+			content, err := os.ReadFile(destPath)
+			if err != nil {
+				return uc.failDownload(file.ContentHash, fmt.Errorf("read: %w", err))
+			}
 			return uc.processULP(ctx, file, content)
 		}
 		return uc.failDownload(file.ContentHash, fmt.Errorf("unsupported: %s", fileType))
@@ -446,6 +462,19 @@ func splitULPContent(content string) []string {
 		parts = append(parts, cur.String())
 	}
 	return parts
+}
+
+// optimalThreads retorna número ideal de threads baseado no tamanho do arquivo.
+// Arquivos pequenos usam menos threads (menos overhead).
+func (uc *ProcessFileUseCase) optimalThreads(fileSize int64) int {
+	switch {
+	case fileSize < 50*1024*1024: // <50MB
+		return 4
+	case fileSize < 200*1024*1024: // <200MB
+		return 8
+	default: // >=200MB
+		return 16
+	}
 }
 
 // uploadULPContent faz split automatico se > 49MB e faz upload de cada parte.
