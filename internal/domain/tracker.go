@@ -43,6 +43,7 @@ type GroupState struct {
 	TotalFailed     int       `json:"total_failed"`
 	ConsecFails     int       `json:"consec_fails"` // falhas consecutivas de validação
 	LastValidated   time.Time `json:"last_validated"`
+	FloodWaitUntil  time.Time `json:"flood_wait_until,omitempty"`
 }
 
 type TrackerState struct {

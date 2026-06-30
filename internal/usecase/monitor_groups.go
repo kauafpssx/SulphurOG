@@ -93,19 +93,54 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 			}
 		}
 
-		// Fase 1: escaneia TODOS os grupos e enfileira arquivos novos
-		for _, group := range allGroups {
-			if !group.Active || group.Dead || !group.Validated || group.ChannelID == 0 {
-				continue
-			}
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			uc.enqueueGroup(ctx, group)
-			time.Sleep(5 * time.Second)
+	// Fase 1: escaneia TODOS os grupos e enfileira arquivos novos
+	// Coleta FLOOD_WAITs e dorme o tempo necessário antes de retry
+	var floodWaitGroups []domain.Group
+
+	for _, group := range allGroups {
+		if !group.Active || group.Dead || !group.Validated || group.ChannelID == 0 {
+			continue
 		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		flooded := uc.enqueueGroup(ctx, group)
+		if flooded {
+			floodWaitGroups = append(floodWaitGroups, group)
+		}
+		time.Sleep(5 * time.Second)
+	}
+
+	// Se teve FLOOD_WAIT, dorme o tempo máximo e retry os grupos pulados
+	if len(floodWaitGroups) > 0 {
+		// Pega o maior FLOOD_WAIT dos grupos pulados
+		var maxFloodWait time.Time
+		for _, g := range floodWaitGroups {
+			state, err := uc.tracker.GetGroupState(g.Identifier)
+			if err == nil && state != nil && state.FloodWaitUntil.After(maxFloodWait) {
+				maxFloodWait = state.FloodWaitUntil
+			}
+		}
+		if !maxFloodWait.IsZero() {
+			wait := time.Until(maxFloodWait)
+			if wait > 0 {
+				uc.log.Info().Dur("wait", wait).Int("groups", len(floodWaitGroups)).Msg("FLOOD_WAIT: sleeping before retry")
+				time.Sleep(wait)
+			}
+			uc.log.Info().Int("groups", len(floodWaitGroups)).Msg("retrying groups after FLOOD_WAIT")
+			for _, group := range floodWaitGroups {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				uc.enqueueGroup(ctx, group)
+				time.Sleep(5 * time.Second)
+			}
+		}
+	}
 
 		// Fase 2: processa até 10 arquivos por ciclo, depois volta pro Phase 1
 		processed := 0
@@ -137,10 +172,10 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 }
 
 // enqueueGroup escaneia um grupo e adiciona arquivos novos na fila global.
-// Não processa nada — só enfileira.
-func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.Group) {
+// Retorna true se o grupo foi pausado por FLOOD_WAIT.
+func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.Group) bool {
 	if uc.telegram == nil {
-		return
+		return false
 	}
 
 	log := uc.log.With().Str("group", group.Name).Str("id", group.ID).Logger()
@@ -152,7 +187,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 
 	var pending []domain.PendingFile
 	skipped := 0
- isFirstRun := groupState.LastMessageID == 0
+	isFirstRun := groupState.LastMessageID == 0
 
 	// Busca 10 mensagens mais recentes do grupo
 	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
@@ -161,15 +196,19 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			log.Warn().Err(err).Msg("channel inaccessible, marking dead")
 			groupState.ConsecFails = maxConsecFails
 			uc.killGroup(ctx, group, *groupState, err.Error())
-			return
+			return false
 		}
 		if waitDur := tgclient.FloodWaitDuration(err); waitDur > 0 {
-			log.Warn().Dur("wait", waitDur).Msg("FLOOD_WAIT, will retry next cycle")
-			return
+			groupState.FloodWaitUntil = time.Now().Add(waitDur)
+			uc.tracker.UpdateGroupState(group.Identifier, *groupState)
+			log.Warn().Dur("wait", waitDur).Msg("FLOOD_WAIT, will retry after wait")
+			return true
 		}
 		log.Error().Err(err).Msg("failed to list recent files")
-		return
+		return false
 	}
+	// Scan OK — limpa FLOOD_WAIT anterior
+	groupState.FloodWaitUntil = time.Time{}
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
 
 	for _, f := range recentFiles {
@@ -245,6 +284,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	}
 
 	uc.tracker.UpdateGroupState(group.Identifier, *groupState)
+	return false
 }
 
 // processNextFile pega o arquivo mais recente da fila global e processa.
