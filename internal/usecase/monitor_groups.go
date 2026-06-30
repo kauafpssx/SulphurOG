@@ -134,6 +134,9 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 		groupState = &domain.GroupState{}
 	}
 
+	// Salva estado anterior para decidir se precisa buscar histórico
+	previousOldestID := groupState.OldestMessageID
+
 	var pending []domain.PendingFile
 	skipped := 0
 
@@ -186,9 +189,10 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 		}
 	}
 
-	// Histórico
+	// Histórico: busca mais atrás apenas na primeira vez que vemos o grupo
+	// Grupos já rastreados só precisam dos recentes
 	time.Sleep(2 * time.Second)
-	if groupState.OldestMessageID > 0 {
+	if previousOldestID == 0 && groupState.OldestMessageID > 0 {
 		var histFiles []domain.LogFile
 		var err error
 		for attempt := 0; attempt < 3; attempt++ {
