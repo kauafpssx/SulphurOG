@@ -236,7 +236,7 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 		}
 		password := extractPasswordFromMessage(msg.Message)
 		fileLoc := d.AsInputDocumentFileLocation("")
-		cacheKey := fmt.Sprintf("%d_%d", channelID, msg.ID)
+		cacheKey := fmt.Sprintf("%d_%d_%d", channelID, msg.ID, d.ID)
 		c.fileLocMu.Lock()
 		if len(c.fileLocations) > 500 {
 			c.fileLocations = make(map[string]*tg.InputDocumentFileLocation)
@@ -244,7 +244,7 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 		c.fileLocations[cacheKey] = fileLoc
 		c.fileLocMu.Unlock()
 		result = append(result, domain.LogFile{
-			ID:           fmt.Sprintf("%d_%d", channelID, msg.ID),
+			ID:           fmt.Sprintf("%d_%d_%d", channelID, msg.ID, d.ID),
 			MessageID:    msg.ID,
 			FileID:       fmt.Sprintf("%d", d.ID),
 			SourceURL:    fmt.Sprintf("https://t.me/c/%d/%d", channelID, msg.ID),
