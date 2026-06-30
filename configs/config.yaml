@@ -17,7 +17,7 @@ supabase:
 
 processing:
   temp_dir: /tmp/sulphurog
-  part_size_kb: 2048
+  part_size_kb: 512
   max_retries: 3
   poll_interval: 30s
   threads: 16
