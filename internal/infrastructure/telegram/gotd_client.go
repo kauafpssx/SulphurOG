@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -302,17 +303,23 @@ func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, des
 
 	elapsed := time.Since(startTime).Seconds()
 	speed := float64(info.Size()) / elapsed / 1024 / 1024
-	fmt.Printf("\r  ✓ %s em %.0fs (%.1f MB/s)          \n", formatSize(info.Size()), elapsed, speed)
+	c.log.Info().
+		Str("file", filepath.Base(destPath)).
+		Str("size", formatSize(info.Size())).
+		Float64("elapsed_s", elapsed).
+		Float64("speed_mbps", speed).
+		Msg("download complete")
 	return info.Size(), nil
 }
 
 func (c *GotdClient) monitorProgress(destPath string, totalSize int64, startTime time.Time, done <-chan struct{}) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	var activeTime time.Duration
 	var lastCheck = time.Now()
 	var lastSizeCheck int64
+	lastLoggedPct := -1
 
 	for {
 		select {
@@ -347,7 +354,18 @@ func (c *GotdClient) monitorProgress(destPath string, totalSize int64, startTime
 				eta = float64(totalSize-currentSize) / (speed * 1024 * 1024)
 			}
 
-			fmt.Printf("\r%s", renderProgressBar(currentSize, totalSize, speed, elapsed, eta, waiting))
+			pct := 0
+			if totalSize > 0 {
+				pct = int(float64(currentSize) / float64(totalSize) * 100)
+			}
+
+			if pct/10 > lastLoggedPct/10 || lastLoggedPct < 0 {
+				c.log.Info().
+					Str("progress", renderProgressCompact(currentSize, totalSize, speed, elapsed, eta, waiting)).
+					Int("pct", pct).
+					Msg("downloading")
+				lastLoggedPct = pct
+			}
 		}
 	}
 }
@@ -382,6 +400,20 @@ func (c *GotdClient) GetChannelStatus(ctx context.Context, identifier string) (b
 	}
 
 	return active, msgs[0].MessageID, msgs[0].Date, nil
+}
+
+func renderProgressCompact(current, total int64, speed float64, elapsed, eta float64, waiting bool) string {
+	etaStr := "--:--"
+	if eta > 0 && eta < 86400 {
+		m := int(eta) / 60
+		s := int(eta) % 60
+		etaStr = fmt.Sprintf("%dm%02ds", m, s)
+	}
+	status := ""
+	if waiting {
+		status = " (waiting)"
+	}
+	return fmt.Sprintf("%s/%s %.1fMB/s eta:%s%s", formatSize(current), formatSize(total), speed, etaStr, status)
 }
 
 func renderProgressBar(current, total int64, speed float64, elapsed, eta float64, waiting bool) string {

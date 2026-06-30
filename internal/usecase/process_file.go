@@ -280,14 +280,20 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 					}
 				}
 			}
-			for _, v := range victims {
-				if totalSize <= maxSize {
-					break
-				}
-				log.Info().Str("dir", v.path).Int64("size_mb", v.size/1024/1024).Msg("removing large cookie folder to fit 49MB")
-				os.RemoveAll(v.path)
-				totalSize -= v.size
+		var removedCount int
+		var freedMB int64
+		for _, v := range victims {
+			if totalSize <= maxSize {
+				break
 			}
+			os.RemoveAll(v.path)
+			totalSize -= v.size
+			freedMB += v.size / 1024 / 1024
+			removedCount++
+		}
+		if removedCount > 0 {
+			log.Info().Int("removed", removedCount).Int64("freed_mb", freedMB).Msg("trimmed cookie folders to fit 49MB")
+		}
 		}
 
 		if err := zipDir(cookiesStagingDir, cookiesZipPath); err != nil {
