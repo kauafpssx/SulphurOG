@@ -59,6 +59,7 @@ type Tracker interface {
 	RemovePendingByGroup(groupID string) error
 	IsDuplicateFile(filename string, fileSize int64) (bool, error)
 	GetStats() (downloaded int, processed int, failed int, pending int, err error)
+	GetDetailedStats() (*DetailedStats, error)
 }
 
 type HashService interface {

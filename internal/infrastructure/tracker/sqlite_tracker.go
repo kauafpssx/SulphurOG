@@ -369,6 +369,77 @@ func (t *SQLiteTracker) GetStats() (downloading, finished, failed, pending int, 
 	return
 }
 
+func (t *SQLiteTracker) GetDetailedStats() (*domain.DetailedStats, error) {
+	stats := &domain.DetailedStats{
+		ByExtension: make(map[string]int),
+	}
+
+	// Status counts
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'queued'`).Scan(&stats.Queued)
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'downloading'`).Scan(&stats.Downloading)
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'downloaded'`).Scan(&stats.Downloaded)
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'uploading'`).Scan(&stats.Uploading)
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'finished'`).Scan(&stats.Finished)
+	t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE status = 'failed'`).Scan(&stats.Failed)
+	t.db.QueryRow(`SELECT COUNT(*) FROM pending_files`).Scan(&stats.Pending)
+
+	// Sizes
+	t.db.QueryRow(`SELECT COALESCE(SUM(file_size), 0) FROM downloaded_files`).Scan(&stats.TotalBytes)
+	t.db.QueryRow(`SELECT COALESCE(SUM(file_size), 0) FROM downloaded_files WHERE status = 'finished'`).Scan(&stats.FinishedBytes)
+
+	// ULP count
+	t.db.QueryRow(`SELECT COALESCE(SUM(ulp_count), 0) FROM downloaded_files WHERE status = 'finished'`).Scan(&stats.TotalULPs)
+
+	// File type breakdown
+	extRows, err := t.db.Query(`
+		SELECT 
+			CASE 
+				WHEN filename LIKE "%.zip" THEN ".zip"
+				WHEN filename LIKE "%.rar" THEN ".rar"
+				WHEN filename LIKE "%.7z" THEN ".7z"
+				WHEN filename LIKE "%.gz" THEN ".gz"
+				WHEN filename LIKE "%.txt" THEN ".txt"
+				ELSE "other"
+			END as ext,
+			COUNT(*) as cnt
+		FROM downloaded_files
+		GROUP BY ext
+		ORDER BY cnt DESC
+	`)
+	if err == nil {
+		defer extRows.Close()
+		for extRows.Next() {
+			var ext string
+			var cnt int
+			if extRows.Scan(&ext, &cnt) == nil {
+				stats.ByExtension[ext] = cnt
+			}
+		}
+	}
+
+	// Timing
+	t.db.QueryRow(`SELECT MIN(downloaded_at) FROM downloaded_files WHERE downloaded_at != ''`).Scan(&stats.FirstFileAt)
+	t.db.QueryRow(`SELECT MAX(downloaded_at) FROM downloaded_files WHERE downloaded_at != ''`).Scan(&stats.LastFileAt)
+
+	// Calculate files per day
+	if stats.FirstFileAt != nil && stats.LastFileAt != nil {
+		days := stats.LastFileAt.Sub(*stats.FirstFileAt).Hours() / 24
+		if days > 0 {
+			stats.FilesPerDay = float64(stats.Finished+stats.Failed) / days
+		} else {
+			stats.FilesPerDay = float64(stats.Finished + stats.Failed)
+		}
+	}
+
+	// Avg file size
+	totalFiles := stats.Finished + stats.Failed
+	if totalFiles > 0 {
+		stats.AvgFileSizeMB = float64(stats.TotalBytes) / float64(totalFiles) / 1024 / 1024
+	}
+
+	return stats, nil
+}
+
 func formatTime(t time.Time) string {
 	if t.IsZero() {
 		return ""

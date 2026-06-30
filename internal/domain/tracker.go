@@ -62,3 +62,38 @@ type PendingFile struct {
 	Priority  int       `json:"priority"`
 	Password  string    `json:"password"`
 }
+
+type DetailedStats struct {
+	// Counts by status
+	Queued      int `json:"queued"`
+	Downloading int `json:"downloading"`
+	Downloaded  int `json:"downloaded"`
+	Uploading   int `json:"uploading"`
+	Finished    int `json:"finished"`
+	Failed      int `json:"failed"`
+	Pending     int `json:"pending"`
+
+	// Sizes
+	TotalBytes    int64 `json:"total_bytes"`
+	FinishedBytes int64 `json:"finished_bytes"`
+
+	// ULP stats
+	TotalULPs int `json:"total_ulps"`
+
+	// File type breakdown
+	ByExtension map[string]int `json:"by_extension"`
+
+	// Group stats
+	GroupsTotal    int `json:"groups_total"`
+	GroupsActive   int `json:"groups_active"`
+	GroupsDead     int `json:"groups_dead"`
+	GroupsUnauthed int `json:"groups_unauthed"`
+
+	// Timing
+	FirstFileAt  *time.Time `json:"first_file_at,omitempty"`
+	LastFileAt   *time.Time `json:"last_file_at,omitempty"`
+
+	// Rates (files per day)
+	FilesPerDay   float64 `json:"files_per_day"`
+	AvgFileSizeMB float64 `json:"avg_file_size_mb"`
+}

@@ -21,6 +21,13 @@ processing:
   max_retries: 3
   poll_interval: 30s
   threads: 16
+  process_cookies: true
+  allowed_extensions:
+    - .zip
+    - .rar
+    - .7z
+    - .gz
+    - .txt
 
 logging:
   level: info

@@ -18,15 +18,16 @@ import (
 )
 
 type ProcessFileUseCase struct {
-	telegram   domain.TelegramClient
-	extractor  domain.ArchiveExtractor
-	parser     domain.LogParser
-	storage    domain.SupabaseStorage
-	tracker    domain.Tracker
-	hasher     domain.HashService
-	tempDir    string
-	bucket     string
-	log        zerolog.Logger
+	telegram       domain.TelegramClient
+	extractor      domain.ArchiveExtractor
+	parser         domain.LogParser
+	storage        domain.SupabaseStorage
+	tracker        domain.Tracker
+	hasher         domain.HashService
+	tempDir        string
+	bucket         string
+	processCookies bool
+	log            zerolog.Logger
 }
 
 func NewProcessFileUseCase(
@@ -38,18 +39,20 @@ func NewProcessFileUseCase(
 	hasher domain.HashService,
 	tempDir string,
 	bucket string,
+	processCookies bool,
 	log zerolog.Logger,
 ) *ProcessFileUseCase {
 	return &ProcessFileUseCase{
-		telegram:  telegram,
-		extractor: extractor,
-		parser:    parser,
-		storage:   storage,
-		tracker:   tracker,
-		hasher:    hasher,
-		tempDir:   tempDir,
-		bucket:    bucket,
-		log:       log,
+		telegram:       telegram,
+		extractor:      extractor,
+		parser:         parser,
+		storage:        storage,
+		tracker:        tracker,
+		hasher:         hasher,
+		tempDir:        tempDir,
+		bucket:         bucket,
+		processCookies: processCookies,
+		log:            log,
 	}
 }
 
@@ -235,12 +238,50 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 	// Zipar cookies no staging
 	var hasCookiesZip bool
 	cookiesZipPath := filepath.Join(stagingDir, "cookies.zip")
-	if victimIdx > 0 {
+	if victimIdx > 0 && uc.processCookies {
+		// Calcula tamanho de cada pasta de vítima
+		type victimDir struct {
+			path string
+			size int64
+		}
+		var victims []victimDir
+		var totalSize int64
+		for i := 1; i <= victimIdx; i++ {
+			dir := filepath.Join(cookiesStagingDir, fmt.Sprintf("%d", i))
+			s := dirSize(dir)
+			victims = append(victims, victimDir{path: dir, size: s})
+			totalSize += s
+		}
+
+		// Remove pastas maiores até caber em 49MB
+		const maxSize = 49 * 1024 * 1024
+		if totalSize > maxSize {
+			// Ordena por tamanho desc (maiores primeiro)
+			for i := 0; i < len(victims)-1; i++ {
+				for j := i + 1; j < len(victims); j++ {
+					if victims[j].size > victims[i].size {
+						victims[i], victims[j] = victims[j], victims[i]
+					}
+				}
+			}
+			for _, v := range victims {
+				if totalSize <= maxSize {
+					break
+				}
+				log.Info().Str("dir", v.path).Int64("size_mb", v.size/1024/1024).Msg("removing large cookie folder to fit 49MB")
+				os.RemoveAll(v.path)
+				totalSize -= v.size
+			}
+		}
+
 		if err := zipDir(cookiesStagingDir, cookiesZipPath); err != nil {
 			log.Warn().Err(err).Msg("failed to zip cookies, skipping")
 		} else {
 			hasCookiesZip = true
 		}
+		os.RemoveAll(cookiesStagingDir)
+	} else if victimIdx > 0 {
+		// Cookies desativados, limpa direto
 		os.RemoveAll(cookiesStagingDir)
 	}
 
@@ -482,4 +523,16 @@ func zipDir(sourceDir, destZip string) error {
 		_, err = io.Copy(f, src)
 		return err
 	})
+}
+
+func dirSize(path string) int64 {
+	var size int64
+	filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		size += info.Size()
+		return nil
+	})
+	return size
 }

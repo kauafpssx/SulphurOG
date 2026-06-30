@@ -29,11 +29,13 @@ type Config struct {
 		Bucket         string `yaml:"bucket"`
 	} `yaml:"supabase"`
 	Processing struct {
-		TempDir      string `yaml:"temp_dir"`
-		PartSizeKB   int    `yaml:"part_size_kb"`
-		MaxRetries   int    `yaml:"max_retries"`
-		PollInterval string `yaml:"poll_interval"`
-		Threads      int    `yaml:"threads"`
+		TempDir            string   `yaml:"temp_dir"`
+		PartSizeKB         int      `yaml:"part_size_kb"`
+		MaxRetries         int      `yaml:"max_retries"`
+		PollInterval       string   `yaml:"poll_interval"`
+		Threads            int      `yaml:"threads"`
+		ProcessCookies     bool     `yaml:"process_cookies"`
+		AllowedExtensions  []string `yaml:"allowed_extensions"`
 	} `yaml:"processing"`
 	Logging struct {
 		Level string `yaml:"level"`

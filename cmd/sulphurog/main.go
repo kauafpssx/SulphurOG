@@ -111,15 +111,25 @@ func main() {
 	detector := extractor.NewDetector()
 	stealerParser := parser.NewStealerParser()
 
+	// --- Auto-cleanup temp dir ---
+	if cfg.Processing.TempDir != "" {
+		if err := os.RemoveAll(cfg.Processing.TempDir); err != nil {
+			log.Warn().Err(err).Msg("failed to cleanup temp dir")
+		} else {
+			os.MkdirAll(cfg.Processing.TempDir, 0755)
+			log.Info().Str("dir", cfg.Processing.TempDir).Msg("temp dir cleaned")
+		}
+	}
+
 	// --- Supabase ---
 	supaClient := supabase.NewClient(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey)
 
 	// --- Use Cases ---
 	manageGroupsUC := usecase.NewManageGroupsUseCase(groupRepo, tg, trackerSvc)
-	processFileUC := usecase.NewProcessFileUseCase(tg, zipExt, stealerParser, supaClient, trackerSvc, hashSvc, cfg.Processing.TempDir, cfg.Supabase.Bucket, log)
+	processFileUC := usecase.NewProcessFileUseCase(tg, zipExt, stealerParser, supaClient, trackerSvc, hashSvc, cfg.Processing.TempDir, cfg.Supabase.Bucket, cfg.Processing.ProcessCookies, log)
 	_ = sevenZExt
 	_ = detector
-	monitorUC := usecase.NewMonitorGroupsUseCase(tg, processFileUC, groupRepo, trackerSvc, log)
+	monitorUC := usecase.NewMonitorGroupsUseCase(tg, processFileUC, groupRepo, trackerSvc, cfg.Processing.AllowedExtensions, log)
 
 	// Iniciar monitor em background
 	go monitorUC.Run(context.Background())
@@ -153,7 +163,7 @@ func main() {
 	groupsHandler.RegisterRoutes(app)
 
 	// Status
-	statusHandler := api.NewStatusHandler(manageGroupsUC)
+	statusHandler := api.NewStatusHandler(manageGroupsUC, trackerSvc)
 	statusHandler.RegisterRoutes(app)
 
 	// Monitor control

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -25,6 +27,7 @@ type MonitorGroupsUseCase struct {
 	log         zerolog.Logger
 	cycleCount  int
 	groupsCache []domain.Group
+	allowedExt  map[string]bool
 }
 
 func NewMonitorGroupsUseCase(
@@ -32,14 +35,27 @@ func NewMonitorGroupsUseCase(
 	processor *ProcessFileUseCase,
 	groups domain.GroupRepository,
 	tracker domain.Tracker,
+	allowedExts []string,
 	log zerolog.Logger,
 ) *MonitorGroupsUseCase {
+	extMap := make(map[string]bool)
+	for _, ext := range allowedExts {
+		extMap[strings.ToLower(ext)] = true
+	}
+	if len(extMap) == 0 {
+		extMap[".zip"] = true
+		extMap[".rar"] = true
+		extMap[".7z"] = true
+		extMap[".gz"] = true
+		extMap[".txt"] = true
+	}
 	return &MonitorGroupsUseCase{
 		telegram:  telegram,
 		processor: processor,
 		groups:    groups,
 		tracker:   tracker,
 		log:       log,
+		allowedExt: extMap,
 	}
 }
 
@@ -159,6 +175,10 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			skipped++
 			continue
 		}
+		if !uc.isAllowedExtension(f.Filename) {
+			skipped++
+			continue
+		}
 		if f.MessageID <= groupState.LastMessageID {
 			continue
 		}
@@ -213,6 +233,10 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			log.Info().Int("count", len(histFiles)).Msg("historical files found")
 		for _, f := range histFiles {
 			if f.Password == "" && group.IgnoreWithoutPassword {
+				skipped++
+				continue
+			}
+			if !uc.isAllowedExtension(f.Filename) {
 				skipped++
 				continue
 			}
@@ -352,6 +376,12 @@ func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize
 		return true
 	}
 	return false
+}
+
+// isAllowedExtension verifica se o arquivo tem extensão permitida.
+func (uc *MonitorGroupsUseCase) isAllowedExtension(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return uc.allowedExt[ext]
 }
 
 // groupByIdentifier busca grupo no cache (atualizado a cada ciclo).
