@@ -154,7 +154,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	skipped := 0
  isFirstRun := groupState.LastMessageID == 0
 
-	// Busca 10 mensagens mais recentes do grupo
+	// Busca 10 mensagens mais recentes do grupo (com retry em FLOOD_WAIT)
 	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
 	if err != nil {
 		if tgclient.IsChannelError(err) {
@@ -163,8 +163,18 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			uc.killGroup(ctx, group, *groupState, err.Error())
 			return
 		}
-		log.Error().Err(err).Msg("failed to list recent files")
-		return
+		if waitDur := tgclient.FloodWaitDuration(err); waitDur > 0 {
+			log.Warn().Dur("wait", waitDur).Msg("FLOOD_WAIT, sleeping before retry")
+			time.Sleep(waitDur)
+			recentFiles, err = uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to list recent files after retry")
+				return
+			}
+		} else {
+			log.Error().Err(err).Msg("failed to list recent files")
+			return
+		}
 	}
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
 
