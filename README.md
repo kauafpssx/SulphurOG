@@ -16,6 +16,11 @@ Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva n
 - Valida grupos a cada 10 ciclos, mata grupos mortos e limpa a fila
 - Deduplica por source URL e por `(filename, filesize)`
 - Reconnect automático com backoff exponencial (30s → 5min)
+- Download paralelo dinâmico: <50MB=4 threads, <200MB=8, ≥200MB=16
+- Upload streaming: lê do disco direto pro Supabase sem carregar na RAM
+- FLOOD_WAIT: pula grupo no ciclo atual ao invés de retry (evita penalidades maiores)
+- Remove pastas de cookies órfãs em batch (log único ao invés de 400+ linhas)
+- Suporte a invite links (`https://t.me/+hash`) para grupos privados
 
 ## 🏗️ Arquitetura
 
@@ -26,7 +31,7 @@ Telegram MTProto (gotd/td)
      ↓
 MonitorGroups — ciclo: scan grupos → enfileira → processa 10 arquivos
      ↓
-ProcessFile — download → extração 7z → parse → upload
+ProcessFile — download (4-16 threads dinâmicas) → detecta tipo (4 bytes) → extração 7z → parse → upload streaming
      ↓
 Supabase Storage
 ```
@@ -152,7 +157,7 @@ processing:
   part_size_kb: 512
   max_retries: 3
   poll_interval: 30s
-  threads: 16
+  threads: 16                     # fallback; dinâmico: <50MB=4, <200MB=8, ≥200MB=16
   process_cookies: true           # false para ignorar cookies
   allowed_extensions:             # extensões aceitas
     - .zip
