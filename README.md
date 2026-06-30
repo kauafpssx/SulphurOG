@@ -10,6 +10,9 @@ Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva n
 - Parseia três formatos de log: ULP simples (`URL:login:senha`), YAML e Key-Value
 - Agrupa cookies por vítima, sobe `ulp.txt` + `cookies.zip` pro Supabase
 - Divide arquivos ULP acima de 49MB automaticamente
+- Filtra extensões: só processa `.zip`, `.rar`, `.7z`, `.gz`, `.txt` (configurável)
+- Remove cookies grandes automaticamente para caber em 49MB antes de zipar
+- Auto-cleanup do temp dir no startup (previne acumulo após crash)
 - Valida grupos a cada 10 ciclos, mata grupos mortos e limpa a fila
 - Deduplica por source URL e por `(filename, filesize)`
 - Reconnect automático com backoff exponencial (30s → 5min)
@@ -96,6 +99,7 @@ Todas as rotas exigem `X-API-Key: <sua_key>`, exceto `/api/health`.
 | `DELETE` | `/api/groups/:id` | Remove grupo |
 | `GET` | `/api/groups/:id/health` | Valida grupo no Telegram |
 | `GET` | `/api/status` | Estatísticas gerais |
+| `GET` | `/api/stats` | Métricas detalhadas + previsões |
 
 ```bash
 # Adicionar grupo
@@ -114,6 +118,49 @@ curl -X POST http://servidor:8090/api/groups \
 Aceita username (`https://t.me/canal`) e invite link (`https://t.me/+hash`).
 
 `ignore_without_password: true` faz o monitor não pular arquivos sem senha na mensagem. Útil para canais de multi-partes onde a senha está em outro lugar.
+
+## 📊 Stats endpoint
+
+`GET /api/stats` retorna métricas completas:
+
+```json
+{
+  "finished": 150,
+  "failed": 3,
+  "pending": 12,
+  "total_bytes": 5368709120,
+  "total_ulps": 45200,
+  "by_extension": {".zip": 120, ".rar": 25, ".txt": 5},
+  "groups_total": 10,
+  "groups_active": 8,
+  "predictions": {
+    "files_per_day": 12.5,
+    "files_per_month": 375,
+    "avg_file_size_mb": 34.2,
+    "bucket_used_gb": 4.8,
+    "bucket_free_gb": 45.2,
+    "days_until_full": 108
+  }
+}
+```
+
+## ⚙️ Config.yaml
+
+```yaml
+processing:
+  temp_dir: /tmp/sulphurog
+  part_size_kb: 512
+  max_retries: 3
+  poll_interval: 30s
+  threads: 16
+  process_cookies: true           # false para ignorar cookies
+  allowed_extensions:             # extensões aceitas
+    - .zip
+    - .rar
+    - .7z
+    - .gz
+    - .txt
+```
 
 ## 📁 Estrutura no Supabase
 
