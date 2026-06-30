@@ -103,9 +103,17 @@ curl -X POST http://servidor:8090/api/groups \
   -H "X-API-Key: sua_key" \
   -H "Content-Type: application/json" \
   -d '{"identifier": "https://t.me/NomeDoCanal"}'
+
+# Grupo sem senha (multi-partes)
+curl -X POST http://servidor:8090/api/groups \
+  -H "X-API-Key: sua_key" \
+  -H "Content-Type: application/json" \
+  -d '{"identifier": "https://t.me/NomeDoCanal", "ignore_without_password": true}'
 ```
 
 Aceita username (`https://t.me/canal`) e invite link (`https://t.me/+hash`).
+
+`ignore_without_password: true` faz o monitor não pular arquivos sem senha na mensagem. Útil para canais de multi-partes onde a senha está em outro lugar.
 
 ## 📁 Estrutura no Supabase
 
