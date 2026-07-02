@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -160,8 +161,21 @@ func (uc *ProcessFileUseCase) processULP(ctx context.Context, file domain.LogFil
 	return nil
 }
 
+var splitRarPattern = regexp.MustCompile(`(?i)\.part\d+\.rar$`)
+
 func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.LogFile, archivePath string) error {
 	log := uc.log.With().Str("file", file.Filename).Logger()
+
+	// Fix D: detectar split RAR (part01.rar, part02.rar, etc.) e pular
+	if splitRarPattern.MatchString(file.Filename) {
+		return uc.failDownload(file.ContentHash, fmt.Errorf("split RAR archive — needs all parts, skipping"))
+	}
+
+	// Fix E: validar magic bytes antes de extrair
+	fileType := uc.detectFileType(archivePath)
+	if fileType != "zip" && fileType != "rar" && fileType != "7z" && fileType != "gz" {
+		return uc.failDownload(file.ContentHash, fmt.Errorf("invalid archive (magic bytes: %s)", fileType))
+	}
 
 	ts := time.Now().Format("150405")
 	extractDir := filepath.Join(uc.tempDir, "ext_"+ts)

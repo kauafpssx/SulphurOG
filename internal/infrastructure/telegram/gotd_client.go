@@ -508,6 +508,15 @@ func isFloodWait(err error) bool {
 	return FloodWaitDuration(err) > 0
 }
 
+// IsFileReferenceExpired detecta se o erro é FILE_REFERENCE_EXPIRED.
+func IsFileReferenceExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToUpper(err.Error())
+	return strings.Contains(s, "FILE_REFERENCE_EXPIRED")
+}
+
 // IsChannelError detecta erros que indicam canal deletado/privado/inacessível.
 func IsChannelError(err error) bool {
 	if err == nil {

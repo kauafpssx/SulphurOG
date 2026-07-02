@@ -11,6 +11,8 @@ import (
 	"github.com/sulphurog/sulphurog/internal/domain"
 )
 
+const maxRetries = 3
+
 type SQLiteTracker struct {
 	db *sql.DB
 }
@@ -90,6 +92,8 @@ func (t *SQLiteTracker) migrate() error {
 	migrations := []string{
 		`ALTER TABLE group_states ADD COLUMN consec_fails INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE group_states ADD COLUMN last_validated TEXT`,
+		`ALTER TABLE group_states ADD COLUMN flood_wait_until TEXT`,
+		`ALTER TABLE downloaded_files ADD COLUMN retries INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, m := range migrations {
 		if _, err := t.db.Exec(m); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
@@ -108,7 +112,7 @@ func (t *SQLiteTracker) Load() (*domain.TrackerState, error) {
 	}
 
 	rows, err := t.db.Query(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
-		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password
+		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries
 		FROM downloaded_files`)
 	if err != nil {
 		return nil, err
@@ -119,7 +123,7 @@ func (t *SQLiteTracker) Load() (*domain.TrackerState, error) {
 		var downloadedAt, downloadDoneAt, uploadStartAt, finishedAt, failedAt string
 		if err := rows.Scan(&r.ContentHash, &r.MessageID, &r.FileID, &r.Source, &r.Group, &r.Filename, &r.FileSize,
 			&r.Type, &r.Status, &downloadedAt, &downloadDoneAt, &uploadStartAt, &finishedAt, &failedAt,
-			&r.UploadedTo, &r.ULPCount, &r.Error, &r.Password); err != nil {
+			&r.UploadedTo, &r.ULPCount, &r.Error, &r.Password, &r.Retries); err != nil {
 			continue
 		}
 		r.DownloadedAt = parseTime(downloadedAt)
@@ -145,18 +149,20 @@ func (t *SQLiteTracker) Load() (*domain.TrackerState, error) {
 		state.Pending = append(state.Pending, p)
 	}
 
-	groupRows, err := t.db.Query(`SELECT group_url, last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed FROM group_states`)
+	groupRows, err := t.db.Query(`SELECT group_url, last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed, consec_fails, last_validated, flood_wait_until FROM group_states`)
 	if err != nil {
 		return nil, err
 	}
 	defer groupRows.Close()
 	for groupRows.Next() {
 		var g domain.GroupState
-		var groupURL, lastCheck string
-		if err := groupRows.Scan(&groupURL, &g.LastMessageID, &g.OldestMessageID, &lastCheck, &g.TotalDownloaded, &g.TotalULPs, &g.TotalFailed); err != nil {
+		var groupURL, lastCheck, lastValidated, floodWaitUntil string
+		if err := groupRows.Scan(&groupURL, &g.LastMessageID, &g.OldestMessageID, &lastCheck, &g.TotalDownloaded, &g.TotalULPs, &g.TotalFailed, &g.ConsecFails, &lastValidated, &floodWaitUntil); err != nil {
 			continue
 		}
 		g.LastCheck = parseTime(lastCheck)
+		g.LastValidated = parseTime(lastValidated)
+		g.FloodWaitUntil = parseTime(floodWaitUntil)
 		state.Groups[groupURL] = g
 	}
 
@@ -172,11 +178,11 @@ func (t *SQLiteTracker) Save(state *domain.TrackerState) error {
 	defer tx.Rollback()
 
 	for _, r := range state.DownloadedFiles {
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO downloaded_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO downloaded_files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			r.ContentHash, r.MessageID, r.FileID, r.Source, r.Group, r.Filename, r.FileSize, r.Type, r.Status,
 			formatTime(r.DownloadedAt), formatNullTime(r.DownloadDoneAt), formatNullTime(r.UploadStartAt),
 			formatNullTime(r.FinishedAt), formatNullTime(r.FailedAt),
-			r.UploadedTo, r.ULPCount, r.Error, r.Password); err != nil {
+			r.UploadedTo, r.ULPCount, r.Error, r.Password, r.Retries); err != nil {
 			return err
 		}
 	}
@@ -187,8 +193,8 @@ func (t *SQLiteTracker) Save(state *domain.TrackerState) error {
 		}
 	}
 	for groupURL, g := range state.Groups {
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO group_states VALUES (?,?,?,?,?,?,?)`,
-			groupURL, g.LastMessageID, g.OldestMessageID, formatTime(g.LastCheck), g.TotalDownloaded, g.TotalULPs, g.TotalFailed); err != nil {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO group_states VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			groupURL, g.LastMessageID, g.OldestMessageID, formatTime(g.LastCheck), g.TotalDownloaded, g.TotalULPs, g.TotalFailed, g.ConsecFails, formatTime(g.LastValidated), formatTime(g.FloodWaitUntil)); err != nil {
 			return err
 		}
 	}
@@ -198,7 +204,7 @@ func (t *SQLiteTracker) Save(state *domain.TrackerState) error {
 
 func (t *SQLiteTracker) IsDownloaded(contentHash string) (bool, error) {
 	var count int
-	err := t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE content_hash = ? AND status IN ('finished','failed')`, contentHash).Scan(&count)
+	err := t.db.QueryRow(`SELECT COUNT(*) FROM downloaded_files WHERE content_hash = ? AND status = ?`, contentHash, domain.StatusFinished).Scan(&count)
 	return count > 0, err
 }
 
@@ -206,11 +212,11 @@ func (t *SQLiteTracker) GetFileRecord(contentHash string) (*domain.FileRecord, e
 	var r domain.FileRecord
 	var downloadedAt, downloadDoneAt, uploadStartAt, finishedAt, failedAt string
 	err := t.db.QueryRow(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
-		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password
+		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries
 		FROM downloaded_files WHERE content_hash = ?`, contentHash).
 		Scan(&r.ContentHash, &r.MessageID, &r.FileID, &r.Source, &r.Group, &r.Filename, &r.FileSize,
 			&r.Type, &r.Status, &downloadedAt, &downloadDoneAt, &uploadStartAt, &finishedAt, &failedAt,
-			&r.UploadedTo, &r.ULPCount, &r.Error, &r.Password)
+			&r.UploadedTo, &r.ULPCount, &r.Error, &r.Password, &r.Retries)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("file not found: %s", contentHash)
 	}
@@ -226,12 +232,19 @@ func (t *SQLiteTracker) GetFileRecord(contentHash string) (*domain.FileRecord, e
 }
 
 func (t *SQLiteTracker) MarkDownloaded(record domain.FileRecord) error {
+	// Preserva retries se o registro já existe (INSERT OR REPLACE recriaria com 0)
+	var currentRetries int
+	t.db.QueryRow(`SELECT retries FROM downloaded_files WHERE content_hash = ?`, record.ContentHash).Scan(&currentRetries)
+	retries := currentRetries
+	if record.Retries > retries {
+		retries = record.Retries
+	}
 	_, err := t.db.Exec(`INSERT OR REPLACE INTO downloaded_files
-		(content_hash, message_id, file_id, source, group_id, filename, file_size, password, status, downloaded_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		(content_hash, message_id, file_id, source, group_id, filename, file_size, password, status, downloaded_at, retries)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		record.ContentHash, record.MessageID, record.FileID, record.Source, record.Group,
 		record.Filename, record.FileSize, record.Password,
-		domain.StatusDownloading, formatTime(time.Now()))
+		domain.StatusDownloading, formatTime(time.Now()), retries)
 	return err
 }
 
@@ -263,13 +276,40 @@ func (t *SQLiteTracker) MarkFinished(contentHash, uploadedPath string, ulpCount 
 
 func (t *SQLiteTracker) MarkFailed(contentHash, errMsg string) error {
 	now := formatTime(time.Now())
-	_, err := t.db.Exec(`UPDATE downloaded_files SET status = ?, error = ?, failed_at = ? WHERE content_hash = ?`,
-		domain.StatusFailed, errMsg, now, contentHash)
+	// Incrementa retries
+	_, err := t.db.Exec(`UPDATE downloaded_files SET retries = retries + 1 WHERE content_hash = ?`, contentHash)
 	if err != nil {
 		return err
 	}
-	t.db.Exec(`UPDATE group_states SET total_failed = total_failed + 1
-		WHERE group_url = (SELECT group_id FROM downloaded_files WHERE content_hash = ?)`, contentHash)
+
+	// Verifica se excedeu o limite de retries
+	var retries int
+	t.db.QueryRow(`SELECT retries FROM downloaded_files WHERE content_hash = ?`, contentHash).Scan(&retries)
+	if retries >= maxRetries {
+		_, err = t.db.Exec(`UPDATE downloaded_files SET status = ?, error = ?, failed_at = ? WHERE content_hash = ?`,
+			domain.StatusFailed, errMsg, now, contentHash)
+		if err != nil {
+			return err
+		}
+		t.db.Exec(`UPDATE group_states SET total_failed = total_failed + 1
+			WHERE group_url = (SELECT group_id FROM downloaded_files WHERE content_hash = ?)`, contentHash)
+	} else {
+		// Re-add to pending queue for retry
+		r, getErr := t.GetFileRecord(contentHash)
+		if getErr == nil {
+			pendingFile := domain.PendingFile{
+				MessageID: r.MessageID,
+				FileID:    r.FileID,
+				Source:    r.Source,
+				Group:     r.Group,
+				Filename:  r.Filename,
+				FileSize:  r.FileSize,
+				Password:  r.Password,
+				Priority:  0, // Lower priority than new files
+			}
+			t.AddPending([]domain.PendingFile{pendingFile})
+		}
+	}
 	return nil
 }
 
@@ -320,10 +360,10 @@ func (t *SQLiteTracker) RemovePending(sourceURL string) error {
 
 func (t *SQLiteTracker) GetGroupState(groupURL string) (*domain.GroupState, error) {
 	var g domain.GroupState
-	var lastCheck, lastValidated string
-	err := t.db.QueryRow(`SELECT last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed, consec_fails, last_validated
+	var lastCheck, lastValidated, floodWaitUntil string
+	err := t.db.QueryRow(`SELECT last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed, consec_fails, last_validated, flood_wait_until
 		FROM group_states WHERE group_url = ?`, groupURL).
-		Scan(&g.LastMessageID, &g.OldestMessageID, &lastCheck, &g.TotalDownloaded, &g.TotalULPs, &g.TotalFailed, &g.ConsecFails, &lastValidated)
+		Scan(&g.LastMessageID, &g.OldestMessageID, &lastCheck, &g.TotalDownloaded, &g.TotalULPs, &g.TotalFailed, &g.ConsecFails, &lastValidated, &floodWaitUntil)
 	if err == sql.ErrNoRows {
 		return &domain.GroupState{}, nil
 	}
@@ -332,16 +372,18 @@ func (t *SQLiteTracker) GetGroupState(groupURL string) (*domain.GroupState, erro
 	}
 	g.LastCheck = parseTime(lastCheck)
 	g.LastValidated = parseTime(lastValidated)
+	g.FloodWaitUntil = parseTime(floodWaitUntil)
 	return &g, nil
 }
 
 func (t *SQLiteTracker) UpdateGroupState(groupURL string, state domain.GroupState) error {
 	state.LastCheck = time.Now()
 	_, err := t.db.Exec(`INSERT OR REPLACE INTO group_states
-		(group_url, last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed, consec_fails, last_validated)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
+		(group_url, last_message_id, oldest_message_id, last_check, total_downloaded, total_ulps, total_failed, consec_fails, last_validated, flood_wait_until)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		groupURL, state.LastMessageID, state.OldestMessageID, formatTime(state.LastCheck),
-		state.TotalDownloaded, state.TotalULPs, state.TotalFailed, state.ConsecFails, formatTime(state.LastValidated))
+		state.TotalDownloaded, state.TotalULPs, state.TotalFailed, state.ConsecFails, formatTime(state.LastValidated),
+		formatTime(state.FloodWaitUntil))
 	return err
 }
 

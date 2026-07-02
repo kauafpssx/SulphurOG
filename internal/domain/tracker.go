@@ -32,6 +32,7 @@ type FileRecord struct {
 	Error          string     `json:"error,omitempty"`
 	FailedAt       *time.Time `json:"failed_at,omitempty"`
 	Password     string     `json:"password,omitempty"`
+	Retries      int        `json:"retries"`
 }
 
 type GroupState struct {

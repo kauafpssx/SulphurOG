@@ -289,6 +289,26 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 
 // processNextFile pega o arquivo mais recente da fila global e processa.
 // Retorna (true, nil) quando a fila está vazia.
+func (uc *MonitorGroupsUseCase) resolveFileLocation(ctx context.Context, group *domain.Group, file domain.PendingFile) (interface{}, bool) {
+	// Sempre re-fetch file location para evitar FILE_REFERENCE_EXPIRED (Fix F)
+	msgs, fetchErr := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 5, file.MessageID+1)
+	if fetchErr == nil {
+		for _, m := range msgs {
+			if m.MessageID == file.MessageID && m.FileID == file.FileID && m.FileLocation != nil {
+				return m.FileLocation, true
+			}
+		}
+	}
+	// Fallback: tenta cache
+	if provider, ok := uc.telegram.(FileLocationProvider); ok {
+		cacheKey := fmt.Sprintf("%d_%d_%s", group.ChannelID, file.MessageID, file.FileID)
+		if loc, found := provider.GetFileLocation(cacheKey); found {
+			return loc, true
+		}
+	}
+	return nil, false
+}
+
 func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty bool, retErr error) {
 	pendingFiles, err := uc.tracker.GetPending(1)
 	if err != nil || len(pendingFiles) == 0 {
@@ -311,29 +331,18 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 		return false, nil
 	}
 
-	// Resolver file location do cache
-	var fileLocation interface{}
-	if provider, ok := uc.telegram.(FileLocationProvider); ok {
-		cacheKey := fmt.Sprintf("%d_%d_%s", group.ChannelID, file.MessageID, file.FileID)
-		if loc, found := provider.GetFileLocation(cacheKey); found {
-			fileLocation = loc
-		} else {
-			// Cache miss (ex: após reconnect) — re-fetch
-			msgs, fetchErr := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 5, file.MessageID+1)
-			if fetchErr == nil {
-				for _, m := range msgs {
-					if m.MessageID == file.MessageID && m.FileID == file.FileID && m.FileLocation != nil {
-						fileLocation = m.FileLocation
-						break
-					}
-				}
-			}
-			if fileLocation == nil {
-				uc.log.Warn().Str("file", file.Filename).Msg("could not get file location, skipping")
-				uc.tracker.RemovePending(file.Source)
-				return false, nil
-			}
-		}
+	// Verifica se excedeu limite de retries
+	if rec, err := uc.tracker.GetFileRecord(file.Source); err == nil && rec.Retries >= 3 {
+		uc.log.Warn().Str("file", file.Filename).Int("retries", rec.Retries).Msg("max retries exceeded, removing from queue")
+		uc.tracker.RemovePending(file.Source)
+		return false, nil
+	}
+
+	fileLocation, ok := uc.resolveFileLocation(ctx, group, file)
+	if !ok {
+		uc.log.Warn().Str("file", file.Filename).Msg("could not get file location, skipping")
+		uc.tracker.RemovePending(file.Source)
+		return false, nil
 	}
 
 	logFile := domain.LogFile{
@@ -367,6 +376,27 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 			}
 			state.ConsecFails = maxConsecFails
 			uc.killGroup(ctx, *group, *state, err.Error())
+			return false, nil
+		}
+		// FILE_REFERENCE_EXPIRED: tenta uma vez com referência nova (Fix A2)
+		if tgclient.IsFileReferenceExpired(err) {
+			uc.log.Warn().Str("file", file.Filename).Msg("FILE_REFERENCE_EXPIRED, retrying with fresh reference")
+			if newLoc, ok := uc.resolveFileLocation(ctx, group, file); ok {
+				logFile.FileLocation = newLoc
+				retryErr := uc.processor.Execute(ctx, logFile)
+				if retryErr == nil {
+					uc.tracker.RemovePending(file.Source)
+					return false, nil
+				}
+				if tgclient.IsFileReferenceExpired(retryErr) {
+					uc.log.Warn().Str("file", file.Filename).Msg("retry also expired, skipping")
+				} else {
+					uc.log.Error().Err(retryErr).Str("file", file.Filename).Msg("retry failed with different error")
+				}
+			} else {
+				uc.log.Warn().Str("file", file.Filename).Msg("could not refresh file location for retry, skipping")
+			}
+			uc.tracker.RemovePending(file.Source)
 			return false, nil
 		}
 		uc.log.Error().Err(err).Str("file", file.Filename).Msg("process failed")
