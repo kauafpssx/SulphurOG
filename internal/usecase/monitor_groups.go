@@ -378,9 +378,9 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 			uc.killGroup(ctx, *group, *state, err.Error())
 			return false, nil
 		}
-		// FILE_REFERENCE_EXPIRED: tenta uma vez com referência nova (Fix A2)
-		if tgclient.IsFileReferenceExpired(err) {
-			uc.log.Warn().Str("file", file.Filename).Msg("FILE_REFERENCE_EXPIRED, retrying with fresh reference")
+		// Erro transiente (FILE_REFERENCE_EXPIRED, OFFSET_INVALID, etc.): tenta uma vez (Fix A2)
+		if tgclient.IsTransientDownloadError(err) {
+			uc.log.Warn().Str("file", file.Filename).Err(err).Msg("transient error, retrying with fresh reference")
 			if newLoc, ok := uc.resolveFileLocation(ctx, group, file); ok {
 				logFile.FileLocation = newLoc
 				retryErr := uc.processor.Execute(ctx, logFile)
@@ -388,8 +388,8 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 					uc.tracker.RemovePending(file.Source)
 					return false, nil
 				}
-				if tgclient.IsFileReferenceExpired(retryErr) {
-					uc.log.Warn().Str("file", file.Filename).Msg("retry also expired, skipping")
+				if tgclient.IsTransientDownloadError(retryErr) {
+					uc.log.Warn().Str("file", file.Filename).Msg("retry also failed with transient error, skipping")
 				} else {
 					uc.log.Error().Err(retryErr).Str("file", file.Filename).Msg("retry failed with different error")
 				}

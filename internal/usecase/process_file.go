@@ -68,6 +68,11 @@ func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) 
 		return nil
 	}
 
+	// Skip split RAR antes de baixar (economiza banda)
+	if splitRarPattern.MatchString(file.Filename) {
+		return uc.failDownload(file.ContentHash, fmt.Errorf("split RAR archive — needs all parts, skipping"))
+	}
+
 	record := domain.FileRecord{
 		MessageID:   file.MessageID,
 		FileID:      file.FileID,

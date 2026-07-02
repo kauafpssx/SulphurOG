@@ -517,6 +517,18 @@ func IsFileReferenceExpired(err error) bool {
 	return strings.Contains(s, "FILE_REFERENCE_EXPIRED")
 }
 
+// IsTransientDownloadError detecta erros que podem ser retentados.
+func IsTransientDownloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToUpper(err.Error())
+	return strings.Contains(s, "FILE_REFERENCE_EXPIRED") ||
+		strings.Contains(s, "OFFSET_INVALID") ||
+		strings.Contains(s, "FLOOD_WAIT") ||
+		strings.Contains(s, "TIMEOUT")
+}
+
 // IsChannelError detecta erros que indicam canal deletado/privado/inacessível.
 func IsChannelError(err error) bool {
 	if err == nil {
