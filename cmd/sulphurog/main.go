@@ -37,6 +37,14 @@ func main() {
 					addGroupCLI(identifier, name)
 					os.Exit(0)
 				}
+			case "--updategroup":
+				if i+3 < len(os.Args) {
+					id := os.Args[i+1]
+					identifier := os.Args[i+2]
+					name := os.Args[i+3]
+					updateGroupCLI(id, identifier, name)
+					os.Exit(0)
+				}
 			case "--refresh":
 				if err := refreshGroupsCLI(); err != nil {
 					fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -289,4 +297,25 @@ func refreshGroupsCLI() error {
 	fmt.Printf("Refresh concluído: %d grupo(s) marcado(s) para revalidação.\n", refreshed)
 	fmt.Println("O monitor revalidará os grupos no próximo ciclo (até ~60s).")
 	return nil
+}
+
+// updateGroupCLI atualiza o identificador (URL) de um grupo existente.
+// Útil quando o link do canal muda (ex: novo invite link).
+func updateGroupCLI(id, identifier, name string) {
+	repo, err := repository.NewJSONGroupRepo("data/groups.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao inicializar repositorio: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := repo.UpdateIdentifier(id, identifier); err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao atualizar grupo: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Grupo atualizado com sucesso:\n")
+	fmt.Printf("  ID:         %s\n", id)
+	fmt.Printf("  Identifier: %s\n", identifier)
+	fmt.Printf("  Name:       %s\n", name)
+	fmt.Println("O monitor revalidará o grupo no próximo ciclo (até ~60s).")
 }

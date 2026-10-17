@@ -150,6 +150,28 @@ func (r *JSONGroupRepository) Delete(id string) error {
 	return r.save()
 }
 
+// UpdateIdentifier atualiza o identificador (URL) de um grupo existente,
+// resetando os dados do canal para forçar revalidação.
+func (r *JSONGroupRepository) UpdateIdentifier(id, newIdentifier string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	g, ok := r.groups[id]
+	if !ok {
+		return fmt.Errorf("group not found: %s", id)
+	}
+
+	g.Identifier = newIdentifier
+	g.ChannelID = 0
+	g.AccessHash = 0
+	g.Validated = false
+	g.Active = true
+	g.Dead = false
+	g.UpdatedAt = time.Now()
+
+	return r.save()
+}
+
 // MarkUnvalidated redefine um grupo como não validado, forçando o monitor a
 // revalidá-lo no próximo ciclo.
 func (r *JSONGroupRepository) MarkUnvalidated(id string) error {
