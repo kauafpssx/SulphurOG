@@ -138,6 +138,16 @@ Os grupos são gerenciados **exclusivamente via linha de comando**. As rotas HTT
 
 Aceita username (`https://t.me/canal`), invite link (`https://t.me/+hash`) e ID numérico.
 
+### Revalidar grupos existentes
+
+Use quando o Telegram acaba de conectar ou você acabou de aceitar convites de canais privados:
+
+```bash
+./sulphurog --refresh
+```
+
+Isso redefine todos os grupos como não validados, forçando o monitor a revalidá-los no próximo ciclo (até ~60s).
+
 ## API REST
 
 A API possui apenas duas rotas: `/api/health` (público) e `/api/master/files` (requer autenticação).

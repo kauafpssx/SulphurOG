@@ -182,10 +182,11 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 
 	var pending []domain.PendingFile
 	skipped := 0
-	isFirstRun := groupState.LastMessageID == 0
+isFirstRun := groupState.LastMessageID == 0
 
-// Busca 10 mensagens mais recentes do grupo
-	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
+	// Busca as 50 mensagens mais recentes do grupo (aumentado de 10 para 50
+	// para pegar arquivos em mensagens mais antigas em canais com poucas postagens)
+	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 50, 0)
 	if err != nil {
 		if tgclient.IsChannelError(err) {
 			log.Warn().Err(err).Msg("channel inaccessible, marking dead")
