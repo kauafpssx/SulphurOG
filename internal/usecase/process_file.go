@@ -89,9 +89,9 @@ func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) 
 	}()
 
 	if file.FileLocation != nil {
-		// Threads dinâmicas: arquivo pequeno = poucas threads, grande = mais
+		// Threads reduzidas para evitar rate limiting do Telegram
 		threads := uc.optimalThreads(file.FileSize)
-		bytes, err := uc.downloadWithRetry(ctx, file, destPath, threads, 3)
+		bytes, err := uc.downloadWithRetry(ctx, file, destPath, threads, 5)
 		if err != nil {
 			return uc.failDownload(file.ContentHash, fmt.Errorf("download: %w", err))
 		}
@@ -516,8 +516,11 @@ func (uc *ProcessFileUseCase) downloadWithRetry(ctx context.Context, file domain
 	backoff := 5 * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Limpa o arquivo parcial antes de retry
-		os.Remove(destPath)
+		// Só limpa o arquivo parcial na primeira tentativa
+		// Em retries, tenta retomar do onde parou
+		if attempt > 1 {
+			os.Remove(destPath)
+		}
 
 		bytes, err := uc.telegram.DownloadFile(ctx, file.FileLocation, destPath, file.FileSize, threads)
 		if err == nil {

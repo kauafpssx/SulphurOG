@@ -43,10 +43,10 @@ type GotdClient struct {
 
 func NewGotdClient(apiID int, apiHash, phone, sessionFile string, threads, partSizeKB int, log zerolog.Logger) *GotdClient {
 	if threads <= 0 {
-		threads = 16
+		threads = 4
 	}
 	if partSizeKB <= 0 {
-		partSizeKB = 512
+		partSizeKB = 256
 	}
 
 	c := &GotdClient{
@@ -67,8 +67,7 @@ func NewGotdClient(apiID int, apiHash, phone, sessionFile string, threads, partS
 			c.mu.Lock()
 			c.waiting = isFloodWait(e.Err)
 			c.mu.Unlock()
-		}).
-		WithMaxRetries(20)
+		})
 
 	return c
 }
