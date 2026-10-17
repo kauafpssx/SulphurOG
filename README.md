@@ -2,6 +2,64 @@
 
 Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva localmente em arquivos no host.
 
+## Instalação
+
+### Pré-requisitos
+
+- **Go 1.21+** — binário estático, CGO_ENABLED=0
+- **7-Zip** — extração de ZIP/RAR/7z com senha
+- **Docker** — runtime no servidor (opcional)
+
+### Instalação manual
+
+```bash
+# Clonar o repositório
+git clone https://github.com/kauafpssx/SulphurOG.git
+cd SulphurOG
+
+# Instalar dependências
+go mod download
+
+# Build
+make build-linux
+
+# Copiar o binário
+cp bin/sulphurog-linux /usr/local/bin/sulphurog
+```
+
+### Instalação via Docker
+
+```bash
+# Configurar variáveis de ambiente
+cp .env.example .env
+nano .env
+
+# Subir
+docker compose up -d --build
+docker compose logs -f
+```
+
+### Configuração do Telegram
+
+Na primeira execução o app pede o código de verificação do Telegram no terminal:
+
+1. Acesse [my.telegram.org](https://my.telegram.org) → API development tools
+2. Crie um app e anote `api_id` e `api_hash`
+3. Configure no `.env`
+4. Execute o sistema — ele solicitará o código de verificação por SMS/email
+
+### Primeira inicialização
+
+Na primeira execução, o sistema gera automaticamente uma API key aleatória e a salva em `data/api.key`. Essa key é **obrigatória** para fazer requisições à rota mestre e demais endpoints da API.
+
+```bash
+# Inicializar o sistema
+./sulphurog
+
+# A API key será exibida no log e salva em data/api.key
+# Exemplo: "API key gerada na primeira inicialização - salva em data/api.key"
+```
+
 ## O que faz
 
 - Conecta em canais via MTProto (conta real, sem bot)
@@ -35,20 +93,7 @@ ProcessFile — download (4-16 threads dinâmicas) → detecta tipo (4 bytes) �
 Storage local (data/output)
 ```
 
-Estado persistido em SQLite (WAL). Grupos em `data/groups.json`. Sessão Telegram em `data/session.json`.
-
-## Configuração
-
-```bash
-cp .env.example .env
-```
-
-```env
-TG_API_ID=              # my.telegram.org → API development tools
-TG_API_HASH=
-TG_PHONE=+55...
-API_KEY=                # autenticação da API REST
-```
+Estado persistido em SQLite (WAL). Grupos em `data/groups.json`. Sessão Telegram em `data/session.json`. API key em `data/api.key`.
 
 ## Gerenciamento de Grupos
 
@@ -100,6 +145,30 @@ curl -X POST http://servidor:8090/api/master/files \
 ```
 
 Quando `removeafterget=yes`, as contas utilizadas são apagadas de todos os arquivos onde forem encontradas.
+
+### Autenticação com API Key
+
+A API key é **gerada automaticamente na primeira inicialização** e salva em `data/api.key`. Ela é **obrigatória** para fazer requisições à API — sem ela, o sistema não funciona.
+
+```bash
+# A key é gerada automaticamente ao iniciar
+./sulphurog
+
+# Saída esperada:
+# API key gerada na primeira inicialização - salva em data/api.key
+# [hash de 64 caracteres]
+```
+
+Para usar em requisições, inclua o header `X-API-Key`:
+
+```bash
+curl -X POST http://servidor:8090/api/master/files \
+  -H "X-API-Key: sua_api_key_aqui" \
+  -H "Content-Type: application/json" \
+  -d '{"site": "exemplo.com", "file_type": "txt", "removeafterget": "yes"}'
+```
+
+Se precisar regenerar a key, basta deletar o arquivo `data/api.key` e reiniciar o sistema.
 
 ## Config.yaml
 
