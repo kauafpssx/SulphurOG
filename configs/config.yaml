@@ -9,12 +9,6 @@ telegram:
   session_file: data/session.json
   channels: []
 
-supabase:
-  url: ${SUPABASE_URL}
-  anon_key: ${SUPABASE_ANON_KEY}
-  service_role_key: ${SUPABASE_SERVICE_ROLE_KEY}
-  bucket: ${SUPABASE_BUCKET}
-
 processing:
   temp_dir: /tmp/sulphurog
   part_size_kb: 512
@@ -28,6 +22,9 @@ processing:
     - .7z
     - .gz
     - .txt
+
+storage:
+  output_dir: data/output
 
 logging:
   level: info

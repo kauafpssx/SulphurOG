@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -18,16 +19,35 @@ import (
 	"github.com/sulphurog/sulphurog/internal/infrastructure/hash"
 	"github.com/sulphurog/sulphurog/internal/infrastructure/parser"
 	"github.com/sulphurog/sulphurog/internal/infrastructure/repository"
-	"github.com/sulphurog/sulphurog/internal/infrastructure/supabase"
+	"github.com/sulphurog/sulphurog/internal/infrastructure/localstorage"
 	"github.com/sulphurog/sulphurog/internal/infrastructure/tracker"
 	tgclient "github.com/sulphurog/sulphurog/internal/infrastructure/telegram"
 	"github.com/sulphurog/sulphurog/internal/usecase"
 )
 
 func main() {
-	configPath := "configs/config.yaml"
+	// Verificar flags de linha de comando para gerenciamento manual de grupos
 	if len(os.Args) > 1 {
-		configPath = os.Args[1]
+		for i := 1; i < len(os.Args); i++ {
+			switch os.Args[i] {
+			case "--addgroup":
+				if i+2 < len(os.Args) {
+					identifier := os.Args[i+1]
+					name := os.Args[i+2]
+					addGroupCLI(identifier, name)
+					os.Exit(0)
+				}
+			}
+		}
+	}
+
+	configPath := "configs/config.yaml"
+	// Procurar primeiro argumento que não seja uma flag de grupo
+	for i := 1; i < len(os.Args); i++ {
+		if !strings.HasPrefix(os.Args[i], "--") {
+			configPath = os.Args[i]
+			break
+		}
 	}
 
 	cfg, err := LoadConfig(configPath)
@@ -121,12 +141,15 @@ func main() {
 		}
 	}
 
-	// --- Supabase ---
-	supaClient := supabase.NewClient(cfg.Supabase.URL, cfg.Supabase.ServiceRoleKey)
+	// --- Local artifact storage ---
+	artifactStorage, err := localstorage.New(cfg.Storage.OutputDir)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to initialize local storage")
+	}
 
 	// --- Use Cases ---
 	manageGroupsUC := usecase.NewManageGroupsUseCase(groupRepo, tg, trackerSvc)
-	processFileUC := usecase.NewProcessFileUseCase(tg, zipExt, stealerParser, supaClient, trackerSvc, hashSvc, cfg.Processing.TempDir, cfg.Supabase.Bucket, cfg.Processing.ProcessCookies, log)
+	processFileUC := usecase.NewProcessFileUseCase(tg, zipExt, stealerParser, artifactStorage, trackerSvc, hashSvc, cfg.Processing.TempDir, cfg.Processing.ProcessCookies, log)
 	_ = sevenZExt
 	_ = detector
 	monitorUC := usecase.NewMonitorGroupsUseCase(tg, processFileUC, groupRepo, trackerSvc, cfg.Processing.AllowedExtensions, log)
@@ -158,7 +181,7 @@ func main() {
 
 	app.Use(api.APIKeyAuth(apiKey))
 
-	// Groups CRUD
+	// Groups CRUD (apenas leitura)
 	groupsHandler := api.NewGroupsHandler(manageGroupsUC)
 	groupsHandler.RegisterRoutes(app)
 
@@ -169,6 +192,10 @@ func main() {
 	// Monitor control
 	monitorCtrl := api.NewMonitorController()
 	monitorCtrl.RegisterRoutes(app)
+
+	// Super rota mestre para manipulação de arquivos locais
+	masterHandler := api.NewMasterRouteHandler(artifactStorage)
+	masterHandler.RegisterRoutes(app)
 
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -201,4 +228,25 @@ func customErrorHandler(log zerolog.Logger) fiber.ErrorHandler {
 		log.Error().Err(err).Int("status", code).Msg("request error")
 		return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 	}
+}
+
+// addGroupCLI adiciona um grupo via linha de comando (--addgroup identifier name).
+func addGroupCLI(identifier, name string) {
+	repo, err := repository.NewJSONGroupRepo("data/groups.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao inicializar repositorio: %v\n", err)
+		os.Exit(1)
+	}
+
+	uc := usecase.NewManageGroupsUseCase(repo, nil, nil)
+	group, err := uc.CreateGroup(identifier, name, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao adicionar grupo: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Grupo adicionado com sucesso:\n")
+	fmt.Printf("  ID:         %s\n", group.ID)
+	fmt.Printf("  Identifier: %s\n", group.Identifier)
+	fmt.Printf("  Name:       %s\n", group.Name)
 }

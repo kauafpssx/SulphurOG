@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"io"
 	"time"
 )
 
@@ -28,9 +27,10 @@ type LogParser interface {
 	IsULPFormat(content []byte) bool
 }
 
-type SupabaseStorage interface {
-	Upload(ctx context.Context, bucket string, path string, data []byte) error
-	UploadReader(ctx context.Context, bucket string, path string, reader io.Reader, size int64) error
+// ArtifactStorage persists processed artifacts. Implementations must return a
+// stable path that can be stored in the tracker.
+type ArtifactStorage interface {
+	Write(path string, data []byte) (string, error)
 }
 
 type GroupRepository interface {

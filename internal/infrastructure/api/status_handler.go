@@ -75,26 +75,18 @@ func (h *StatusHandler) Stats(c *fiber.Ctx) error {
 	detailed.GroupsDead = groupsDead
 	detailed.GroupsUnauthed = groupsUnauthed
 
-	// Predictions
+	// Predictions are based on local processed data; storage capacity is host-specific.
 	var predictions fiber.Map
 	if detailed.FilesPerDay > 0 {
 		avgFileSizeGB := detailed.AvgFileSizeMB / 1024
-		// Assume 50GB Supabase free tier
-		bucketCapacityGB := 50.0
 		usedGB := float64(detailed.FinishedBytes) / 1024 / 1024 / 1024
-		freeGB := bucketCapacityGB - usedGB
-		daysUntilFull := 0.0
-		if avgFileSizeGB > 0 && detailed.FilesPerDay > 0 {
-			daysUntilFull = freeGB / (avgFileSizeGB * detailed.FilesPerDay)
-		}
+		_ = avgFileSizeGB
 
 		predictions = fiber.Map{
 			"files_per_day":    detailed.FilesPerDay,
 			"files_per_month":  detailed.FilesPerDay * 30,
 			"avg_file_size_mb": detailed.AvgFileSizeMB,
-			"bucket_used_gb":   usedGB,
-			"bucket_free_gb":   freeGB,
-			"days_until_full":  daysUntilFull,
+			"local_storage_used_gb": usedGB,
 		}
 	}
 

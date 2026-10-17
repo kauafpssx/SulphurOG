@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/sulphurog/sulphurog/internal/domain"
 )
+
+var errHistoryScanLimit = errors.New("history scan limit reached")
 
 type GotdClient struct {
 	apiID         int
@@ -212,14 +215,24 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 	var result []domain.LogFile
 	var scanned, skippedNoMedia, skippedNotDoc, skippedEmpty int
 
-	iterator := query.Messages(api).GetHistory(peer)
+	// The history iterator is paginated and otherwise keeps fetching until the
+	// callback stops it. Bound both the request batch and scanned messages so a
+	// channel with few documents cannot make the monitor walk its whole history.
+	const maxScannedMessages = 100
+	iterator := query.Messages(api).GetHistory(peer).BatchSize(limit)
+	if beforeID > 0 {
+		iterator.OffsetID(beforeID)
+	}
 	if err := iterator.ForEach(ctx, func(ctx context.Context, elem messages.Elem) error {
 		if len(result) >= limit {
 			return fmt.Errorf("limit reached")
 		}
 		scanned++
+		if scanned > maxScannedMessages {
+			return errHistoryScanLimit
+		}
 		msg, ok := elem.Msg.(*tg.Message)
-		if !ok || msg.Media == nil || beforeID > 0 && msg.ID >= beforeID {
+		if !ok || msg.Media == nil {
 			skippedNoMedia++
 			return nil
 		}
@@ -262,7 +275,7 @@ func (c *GotdClient) GetMessages(ctx context.Context, channelID int64, accessHas
 			FileLocation: fileLoc,
 		})
 		return nil
-	}); err != nil && err.Error() != "limit reached" {
+	}); err != nil && err.Error() != "limit reached" && !errors.Is(err, errHistoryScanLimit) {
 		return nil, err
 	}
 

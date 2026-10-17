@@ -22,12 +22,9 @@ type Config struct {
 		SessionFile string   `yaml:"session_file"`
 		Channels    []string `yaml:"channels"`
 	} `yaml:"telegram"`
-	Supabase struct {
-		URL            string `yaml:"url"`
-		AnonKey        string `yaml:"anon_key"`
-		ServiceRoleKey string `yaml:"service_role_key"`
-		Bucket         string `yaml:"bucket"`
-	} `yaml:"supabase"`
+	Storage struct {
+		OutputDir string `yaml:"output_dir"`
+	} `yaml:"storage"`
 	Processing struct {
 		TempDir            string   `yaml:"temp_dir"`
 		PartSizeKB         int      `yaml:"part_size_kb"`
@@ -109,6 +106,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Processing.Threads == 0 {
 		cfg.Processing.Threads = 16
 	}
+	if cfg.Storage.OutputDir == "" {
+		cfg.Storage.OutputDir = "data/output"
+	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
 	}
@@ -118,10 +118,7 @@ func expandEnvVars(cfg *Config) {
 	cfg.Telegram.APIID = expandEnv(cfg.Telegram.APIID)
 	cfg.Telegram.APIHash = expandEnv(cfg.Telegram.APIHash)
 	cfg.Telegram.Phone = expandEnv(cfg.Telegram.Phone)
-	cfg.Supabase.URL = expandEnv(cfg.Supabase.URL)
-	cfg.Supabase.AnonKey = expandEnv(cfg.Supabase.AnonKey)
-	cfg.Supabase.ServiceRoleKey = expandEnv(cfg.Supabase.ServiceRoleKey)
-	cfg.Supabase.Bucket = expandEnv(cfg.Supabase.Bucket)
+	cfg.Storage.OutputDir = expandEnv(cfg.Storage.OutputDir)
 	cfg.API.APIKey = expandEnv(cfg.API.APIKey)
 
 	// Fallback session file: tentar caminhos comuns
@@ -158,18 +155,6 @@ func expandEnvVars(cfg *Config) {
 	}
 	if cfg.Telegram.Phone == "" {
 		cfg.Telegram.Phone = os.Getenv("TG_PHONE")
-	}
-	if cfg.Supabase.URL == "" {
-		cfg.Supabase.URL = os.Getenv("SUPABASE_URL")
-	}
-	if cfg.Supabase.AnonKey == "" {
-		cfg.Supabase.AnonKey = os.Getenv("SUPABASE_ANON_KEY")
-	}
-	if cfg.Supabase.ServiceRoleKey == "" {
-		cfg.Supabase.ServiceRoleKey = os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
-	}
-	if cfg.Supabase.Bucket == "" {
-		cfg.Supabase.Bucket = os.Getenv("SUPABASE_BUCKET")
 	}
 }
 

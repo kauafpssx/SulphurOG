@@ -22,11 +22,10 @@ type ProcessFileUseCase struct {
 	telegram       domain.TelegramClient
 	extractor      domain.ArchiveExtractor
 	parser         domain.LogParser
-	storage        domain.SupabaseStorage
+	storage        domain.ArtifactStorage
 	tracker        domain.Tracker
 	hasher         domain.HashService
 	tempDir        string
-	bucket         string
 	processCookies bool
 	log            zerolog.Logger
 }
@@ -35,11 +34,10 @@ func NewProcessFileUseCase(
 	telegram domain.TelegramClient,
 	extractor domain.ArchiveExtractor,
 	parser domain.LogParser,
-	storage domain.SupabaseStorage,
+	storage domain.ArtifactStorage,
 	tracker domain.Tracker,
 	hasher domain.HashService,
 	tempDir string,
-	bucket string,
 	processCookies bool,
 	log zerolog.Logger,
 ) *ProcessFileUseCase {
@@ -51,14 +49,10 @@ func NewProcessFileUseCase(
 		tracker:        tracker,
 		hasher:         hasher,
 		tempDir:        tempDir,
-		bucket:         bucket,
 		processCookies: processCookies,
 		log:            log,
 	}
 }
-
-const maxUploadSize = 50 * 1024 * 1024   // 50MB — limite Supabase
-const splitULPThreshold = 49 * 1024 * 1024 // 49MB por parte — margem de segurança
 
 func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) (retErr error) {
 	log := uc.log.With().Str("file", file.Filename).Logger()
@@ -153,16 +147,12 @@ func (uc *ProcessFileUseCase) processULP(ctx context.Context, file domain.LogFil
 	uc.tracker.MarkUploading(file.ContentHash)
 	firstPath, parts, err := uc.uploadULPContent(ctx, folderName, deduped)
 	if err != nil {
-		if errors.Is(err, domain.ErrStorageFull) {
-			uc.tracker.MarkDownloadComplete(file.ContentHash)
-			return err
-		}
-		return uc.failDownload(file.ContentHash, fmt.Errorf("upload: %w", err))
+		return uc.failDownload(file.ContentHash, fmt.Errorf("save locally: %w", err))
 	}
 
 	uc.tracker.MarkFinished(file.ContentHash, firstPath, ulpCount)
 	os.Remove(filepath.Join(uc.tempDir, file.Filename))
-	log.Info().Int("ulps", ulpCount).Int("parts", parts).Msg("ULP uploaded")
+	log.Info().Int("ulps", ulpCount).Int("parts", parts).Str("path", firstPath).Msg("ULP saved locally")
 	return nil
 }
 
@@ -280,39 +270,11 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 			size int64
 		}
 		var victims []victimDir
-		var totalSize int64
 		for i := 1; i <= victimIdx; i++ {
 			dir := filepath.Join(cookiesStagingDir, fmt.Sprintf("%d", i))
 			s := dirSize(dir)
 			victims = append(victims, victimDir{path: dir, size: s})
-			totalSize += s
-		}
-
-		// Remove pastas maiores até caber em 49MB
-		const maxSize = 49 * 1024 * 1024
-		if totalSize > maxSize {
-			// Ordena por tamanho desc (maiores primeiro)
-			for i := 0; i < len(victims)-1; i++ {
-				for j := i + 1; j < len(victims); j++ {
-					if victims[j].size > victims[i].size {
-						victims[i], victims[j] = victims[j], victims[i]
-					}
-				}
-			}
-		var removedCount int
-		var freedMB int64
-		for _, v := range victims {
-			if totalSize <= maxSize {
-				break
-			}
-			os.RemoveAll(v.path)
-			totalSize -= v.size
-			freedMB += v.size / 1024 / 1024
-			removedCount++
-		}
-		if removedCount > 0 {
-			log.Info().Int("removed", removedCount).Int64("freed_mb", freedMB).Msg("trimmed cookie folders to fit 49MB")
-		}
+			_ = s
 		}
 
 		if err := zipDir(cookiesStagingDir, cookiesZipPath); err != nil {
@@ -327,34 +289,28 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 	}
 
 	folderName := time.Now().Format("2006-01-02_15-04-05")
-	log.Info().Msg("uploading...")
+	log.Info().Msg("saving locally...")
 	uc.tracker.MarkUploading(file.ContentHash)
 
 	// ULP — split automatico se > 49MB
 	ulpData, _ := os.ReadFile(ulpStagingPath)
 	firstPath, ulpParts, err := uc.uploadULPContent(ctx, folderName, string(ulpData))
 	if err != nil {
-		if errors.Is(err, domain.ErrStorageFull) {
-			uc.tracker.MarkDownloadComplete(file.ContentHash)
-			return err
-		}
-		return uc.failDownload(file.ContentHash, fmt.Errorf("upload ulp: %w", err))
+		return uc.failDownload(file.ContentHash, fmt.Errorf("save ULP locally: %w", err))
 	}
 	if ulpParts > 1 {
 		log.Info().Int("parts", ulpParts).Msg("ULP split")
 	}
 
-	// Cookies — binario, nao splita
+	// Cookies — binary, kept in the same artifact folder.
 	if hasCookiesZip {
 		zipData, _ := os.ReadFile(cookiesZipPath)
-		if len(zipData) > maxUploadSize {
-			log.Warn().Int("size_mb", len(zipData)/1024/1024).Msg("cookies.zip >50MB, skipping")
-		} else if len(zipData) > 0 {
-			cookiesRemotePath := fmt.Sprintf("%s/cookies.zip", folderName)
-			if err := uc.storage.Upload(ctx, uc.bucket, cookiesRemotePath, zipData); err != nil {
-				log.Warn().Err(err).Msg("failed to upload cookies.zip")
+		if len(zipData) > 0 {
+			cookiesPath := filepath.Join(folderName, "cookies.zip")
+			if _, err := uc.storage.Write(cookiesPath, zipData); err != nil {
+				log.Warn().Err(err).Msg("failed to save cookies.zip")
 			} else {
-				log.Info().Str("path", cookiesRemotePath).Msg("cookies uploaded")
+				log.Info().Str("path", cookiesPath).Msg("cookies saved locally")
 			}
 		}
 	}
@@ -465,30 +421,6 @@ func deduplicateLines(content string) string {
 	return b.String()
 }
 
-// splitULPContent divide em partes de ate splitULPThreshold bytes, quebrando em linha.
-func splitULPContent(content string) []string {
-	if len(content) <= splitULPThreshold {
-		return []string{content}
-	}
-	var parts []string
-	var cur strings.Builder
-	for _, line := range strings.Split(content, "\n") {
-		if line == "" {
-			continue
-		}
-		lineBytes := len(line) + 1
-		if cur.Len() > 0 && cur.Len()+lineBytes > splitULPThreshold {
-			parts = append(parts, cur.String())
-			cur.Reset()
-		}
-		cur.WriteString(line + "\n")
-	}
-	if cur.Len() > 0 {
-		parts = append(parts, cur.String())
-	}
-	return parts
-}
-
 // optimalThreads retorna número ideal de threads baseado no tamanho do arquivo.
 // Arquivos pequenos usam menos threads (menos overhead).
 func (uc *ProcessFileUseCase) optimalThreads(fileSize int64) int {
@@ -502,26 +434,12 @@ func (uc *ProcessFileUseCase) optimalThreads(fileSize int64) int {
 	}
 }
 
-// uploadULPContent faz split automatico se > 49MB e faz upload de cada parte.
-// Retorna path da primeira parte e numero de partes.
+// saveULPContent stores the complete ULP file locally; no cloud size limit applies.
 func (uc *ProcessFileUseCase) uploadULPContent(ctx context.Context, folderName, content string) (firstPath string, parts int, err error) {
-	chunks := splitULPContent(content)
-	parts = len(chunks)
-	for i, chunk := range chunks {
-		var remotePath string
-		if parts == 1 {
-			remotePath = fmt.Sprintf("%s/ulp.txt", folderName)
-		} else {
-			remotePath = fmt.Sprintf("%s/ulp-%d.txt", folderName, i+1)
-		}
-		if i == 0 {
-			firstPath = remotePath
-		}
-		if err = uc.storage.Upload(ctx, uc.bucket, remotePath, []byte(chunk)); err != nil {
-			return firstPath, parts, err
-		}
-	}
-	return firstPath, parts, nil
+	_ = ctx
+	path := filepath.Join(folderName, "ulp.txt")
+	storedPath, err := uc.storage.Write(path, []byte(content))
+	return storedPath, 1, err
 }
 
 func isULPContent(content []byte) bool {

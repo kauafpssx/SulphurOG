@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -153,11 +152,7 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 
 			empty, retErr := uc.processNextFile(ctx)
 			if retErr != nil {
-				if errors.Is(retErr, domain.ErrStorageFull) {
-					uc.log.Warn().Msg("bucket full — pausing 30min")
-					time.Sleep(30 * time.Minute)
-					break
-				}
+				uc.log.Warn().Err(retErr).Msg("processing failed; continuing with the next queued file")
 			}
 			if empty {
 				break
@@ -189,7 +184,7 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 	skipped := 0
 	isFirstRun := groupState.LastMessageID == 0
 
-	// Busca 10 mensagens mais recentes do grupo
+// Busca 10 mensagens mais recentes do grupo
 	recentFiles, err := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 10, 0)
 	if err != nil {
 		if tgclient.IsChannelError(err) {
@@ -204,11 +199,17 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 			log.Warn().Dur("wait", waitDur).Msg("FLOOD_WAIT, will retry after wait")
 			return true
 		}
-		log.Error().Err(err).Msg("failed to list recent files")
+		// Erro genérico: marca LastMessageID para evitar loop infinito
+		// e aplica backoff de 30s antes de tentar novamente.
+		groupState.LastCheck = time.Now()
+		groupState.ConsecFails++
+		uc.tracker.UpdateGroupState(group.Identifier, *groupState)
+		log.Error().Err(err).Msg("failed to list recent files, skipping group this cycle")
 		return false
 	}
-	// Scan OK — limpa FLOOD_WAIT anterior
+	// Scan OK — limpa FLOOD_WAIT anterior e reseta consec fails
 	groupState.FloodWaitUntil = time.Time{}
+	groupState.ConsecFails = 0
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
 
 	for _, f := range recentFiles {
@@ -365,9 +366,6 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 		Msg("downloading")
 
 	if err := uc.processor.Execute(ctx, logFile); err != nil {
-		if errors.Is(err, domain.ErrStorageFull) {
-			return false, domain.ErrStorageFull
-		}
 		if tgclient.IsChannelError(err) {
 			uc.log.Warn().Err(err).Str("group", group.Name).Msg("channel error, marking dead")
 			state, _ := uc.tracker.GetGroupState(group.Identifier)
