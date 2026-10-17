@@ -46,7 +46,38 @@ Na primeira execução o app pede o código de verificação do Telegram no term
 1. Acesse [my.telegram.org](https://my.telegram.org) → API development tools
 2. Crie um app e anote `api_id` e `api_hash`
 3. Configure no `.env`
-4. Execute o sistema — ele solicitará o código de verificação por SMS/email
+
+#### Autenticação via Docker (container interativo)
+
+```bash
+# Corrigir permissões do diretório de dados
+sudo chown -R 1001:1001 data/
+
+# Gerar a sessão do Telegram (container interativo)
+docker run -it --rm \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/configs:/app/configs \
+  -e TG_API_ID="SEU_API_ID" \
+  -e TG_API_HASH="SEU_API_HASH" \
+  -e TG_PHONE="+55..." \
+  sulphurog-sulphurog /app/sulphurog
+```
+
+O sistema vai:
+1. Conectar ao Telegram
+2. Enviar código de verificação para seu celular/email
+3. Pedir o código no terminal (digite e pressione Enter)
+4. Salvar a sessão em `data/session.json`
+
+Após autenticado, use `Ctrl+C` para sair.
+
+#### Reiniciar com a sessão salva
+
+```bash
+docker compose up -d
+```
+
+O container agora usará a sessão existente e não pedirá código novamente.
 
 ### Primeira inicialização
 
