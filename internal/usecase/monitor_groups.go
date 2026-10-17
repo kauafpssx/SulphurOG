@@ -439,7 +439,11 @@ func (uc *MonitorGroupsUseCase) validateGroups(ctx context.Context, groups []dom
 	log.Info().Int("groups", len(groups)).Msg("validating groups...")
 
 	for _, group := range groups {
-		if !group.Active || !group.Validated || group.ChannelID == 0 {
+		if !group.Active || group.Dead {
+			continue
+		}
+		// Valida tanto grupos já validados quanto não validados (ex: recém-adicionados)
+		if group.Validated && group.ChannelID == 0 {
 			continue
 		}
 		select {
@@ -453,7 +457,7 @@ func (uc *MonitorGroupsUseCase) validateGroups(ctx context.Context, groups []dom
 			state = &domain.GroupState{}
 		}
 
-		active, _, _, err := uc.telegram.ResolveChannel(group.Identifier)
+		active, channelID, accessHash, err := uc.telegram.ResolveChannel(group.Identifier)
 		if err != nil || !active {
 			state.ConsecFails++
 			log.Warn().Str("group", group.Name).Int("consec_fails", state.ConsecFails).Err(err).Msg("group unreachable")
@@ -468,6 +472,14 @@ func (uc *MonitorGroupsUseCase) validateGroups(ctx context.Context, groups []dom
 				log.Info().Str("group", group.Name).Msg("group recovered")
 			}
 			state.LastValidated = time.Now()
+			// Atualiza o grupo no repositório com os dados resolvidos
+			group.ChannelID = channelID
+			group.AccessHash = accessHash
+			group.Validated = true
+			group.Active = active
+			if err := uc.groups.Update(&group); err != nil {
+				log.Error().Err(err).Msg("failed to update group after validation")
+			}
 			uc.tracker.UpdateGroupState(group.Identifier, *state)
 		}
 		time.Sleep(3 * time.Second)
