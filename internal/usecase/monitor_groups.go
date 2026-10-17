@@ -153,12 +153,15 @@ func (uc *MonitorGroupsUseCase) Run(ctx context.Context) {
 			empty, retErr := uc.processNextFile(ctx)
 			if retErr != nil {
 				uc.log.Warn().Err(retErr).Msg("processing failed; continuing with the next queued file")
+				// Backoff entre falhas para evitar rate limiting
+				time.Sleep(15 * time.Second)
 			}
 			if empty {
 				break
 			}
 			processed++
-			time.Sleep(5 * time.Second)
+			// Delay entre downloads para evitar rate limiting do Telegram
+			time.Sleep(10 * time.Second)
 		}
 
 		uc.log.Info().Int("cycle", uc.cycleCount).Int("processed", processed).Msg("cycle complete, waiting 60s...")

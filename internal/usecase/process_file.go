@@ -91,7 +91,7 @@ func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) 
 	if file.FileLocation != nil {
 		// Threads dinâmicas: arquivo pequeno = poucas threads, grande = mais
 		threads := uc.optimalThreads(file.FileSize)
-		bytes, err := uc.telegram.DownloadFile(ctx, file.FileLocation, destPath, file.FileSize, threads)
+		bytes, err := uc.downloadWithRetry(ctx, file, destPath, threads, 3)
 		if err != nil {
 			return uc.failDownload(file.ContentHash, fmt.Errorf("download: %w", err))
 		}
@@ -507,4 +507,39 @@ func dirSize(path string) int64 {
 		return nil
 	})
 	return size
+}
+
+// downloadWithRetry tenta baixar um arquivo com retry e backoff exponencial
+// para lidar com rate limiting (FLOOD_WAIT) do Telegram.
+func (uc *ProcessFileUseCase) downloadWithRetry(ctx context.Context, file domain.LogFile, destPath string, threads, maxRetries int) (int64, error) {
+	var lastErr error
+	backoff := 5 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Limpa o arquivo parcial antes de retry
+		os.Remove(destPath)
+
+		bytes, err := uc.telegram.DownloadFile(ctx, file.FileLocation, destPath, file.FileSize, threads)
+		if err == nil {
+			return bytes, nil
+		}
+
+		lastErr = err
+		if attempt < maxRetries {
+			uc.log.Warn().
+				Str("file", file.Filename).
+				Int("attempt", attempt).
+				Err(err).
+				Dur("backoff", backoff).
+				Msg("download failed, retrying")
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+		}
+	}
+
+	return 0, fmt.Errorf("download failed after %d attempts: %w", maxRetries, lastErr)
 }
