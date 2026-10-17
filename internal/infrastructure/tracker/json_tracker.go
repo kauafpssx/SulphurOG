@@ -347,3 +347,19 @@ func (t *JSONTracker) GetStats() (downloading int, finished int, failed int, pen
 
 	return
 }
+
+// IsDuplicateMessage verifica se um arquivo com o mesmo MessageID já foi processado.
+func (t *JSONTracker) IsDuplicateMessage(filename string, messageID int) (bool, error) {
+	if messageID == 0 {
+		return false, nil
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	for _, r := range t.state.DownloadedFiles {
+		if r.Filename == filename && r.MessageID == messageID {
+			return true, nil
+		}
+	}
+	return false, nil
+}

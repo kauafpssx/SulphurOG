@@ -230,7 +230,7 @@ isFirstRun := groupState.LastMessageID == 0
 		// Primeiro run: adiciona todos (marca posição, não perde nada)
 		// Runs seguintes: só novos (mais recentes que último visto)
 		if isFirstRun {
-			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
+			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID); dup {
 				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
 				continue
 			}
@@ -250,7 +250,7 @@ isFirstRun := groupState.LastMessageID == 0
 			if f.MessageID <= groupState.LastMessageID {
 				continue
 			}
-			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize); dup {
+			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID); dup {
 				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
 				continue
 			}
@@ -408,8 +408,19 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 	return false, nil
 }
 
-// isDuplicate verifica source URL, filename+size e tracker.
-func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize int64) bool {
+// isDuplicate verifica se o arquivo já foi processado.
+// Usa MessageID como identificador único principal (arquivos em grupos de logs
+// podem ter o mesmo nome, mas MessageIDs diferentes).
+func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize int64, messageID int) bool {
+	// Se temos MessageID, usamos ele como identificador principal
+	// (arquivos em grupos de logs têm o mesmo nome mas MessageIDs únicos)
+	if messageID > 0 {
+		if dup, _ := uc.tracker.IsDuplicateMessage(filename, messageID); dup {
+			return true
+		}
+		return false
+	}
+	// Fallback para arquivos sem MessageID
 	if already, _ := uc.tracker.IsDownloaded(sourceURL); already {
 		return true
 	}
@@ -446,8 +457,9 @@ func (uc *MonitorGroupsUseCase) validateGroups(ctx context.Context, groups []dom
 		if !group.Active || group.Dead {
 			continue
 		}
-		// Valida tanto grupos já validados quanto não validados (ex: recém-adicionados)
-		if group.Validated && group.ChannelID == 0 {
+		// Pula grupos já validados com ChannelID resolvido
+		// Tenta resolver grupos não validados ou com ChannelID == 0
+		if group.Validated && group.ChannelID != 0 {
 			continue
 		}
 		select {

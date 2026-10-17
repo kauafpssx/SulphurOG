@@ -103,13 +103,19 @@ func (t *SQLiteTracker) migrate() error {
 	return nil
 }
 
-// Load reconstrói TrackerState completo do banco (compatibilidade com interface)
-func (t *SQLiteTracker) Load() (*domain.TrackerState, error) {
-	state := &domain.TrackerState{
-		Groups:          make(map[string]domain.GroupState),
-		DownloadedFiles: make(map[string]domain.FileRecord),
-		Pending:         []domain.PendingFile{},
+// IsDuplicateMessage verifica se um arquivo com o mesmo MessageID já foi processado.
+// Usado para grupos de logs onde todos os arquivos têm o mesmo nome.
+func (t *SQLiteTracker) IsDuplicateMessage(filename string, messageID int) (bool, error) {
+	if messageID == 0 {
+		return false, nil
 	}
+	var exists bool
+	err := t.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM downloaded_files WHERE message_id = ? AND filename = ?)`,
+		messageID, filename,
+	).Scan(&exists)
+	return exists, err
+}
 
 	rows, err := t.db.Query(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
 		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries

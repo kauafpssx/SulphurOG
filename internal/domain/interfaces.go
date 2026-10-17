@@ -58,6 +58,7 @@ type Tracker interface {
 	UpdateGroupState(groupURL string, state GroupState) error
 	RemovePendingByGroup(groupID string) error
 	IsDuplicateFile(filename string, fileSize int64) (bool, error)
+	IsDuplicateMessage(filename string, messageID int) (bool, error)
 	GetStats() (downloaded int, processed int, failed int, pending int, err error)
 	GetDetailedStats() (*DetailedStats, error)
 }
