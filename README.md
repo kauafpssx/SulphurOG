@@ -109,19 +109,26 @@ Aceita username (`https://t.me/canal`), invite link (`https://t.me/+hash`) e ID 
 
 ## API REST
 
-Todas as rotas exigem `X-API-Key: <sua_key>`, exceto `/api/health`.
+A API possui apenas duas rotas: `/api/health` (público) e `/api/master/files` (requer autenticação).
+
+Todas as requisições à `/api/master/files` exigem o header `X-API-Key` com a key gerada automaticamente.
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/health` | Status do servidor |
-| `GET` | `/api/groups` | Lista grupos |
-| `GET` | `/api/groups/:id` | Busca grupo por ID |
-| `GET` | `/api/status` | Estatísticas gerais |
-| `GET` | `/api/stats` | Métricas detalhadas |
-| `POST` | `/api/monitor/start` | Inicia monitor |
-| `POST` | `/api/monitor/pause` | Pausa monitor |
-| `GET` | `/api/monitor/status` | Status do monitor |
+| `GET` | `/api/health` | Status do servidor (público) |
 | `POST` | `/api/master/files` | Super rota para manipulação de arquivos locais |
+
+### Autenticação
+
+A API key é **gerada automaticamente na primeira inicialização** e salva em `data/api.key`. Ela é **obrigatória** para a rota mestre — sem ela, o sistema não funciona.
+
+```bash
+# A key é gerada automaticamente ao iniciar
+./sulphurog
+
+# Saída esperada:
+# API key gerada na primeira inicialização - salva em data/api.key
+```
 
 ### Super rota mestre: `/api/master/files`
 
@@ -135,7 +142,7 @@ Recebe requisições POST com os parâmetros do site, tipo de arquivo e opção 
 **Exemplo:**
 ```bash
 curl -X POST http://servidor:8090/api/master/files \
-  -H "X-API-Key: sua_key" \
+  -H "X-API-Key: sua_api_key_aqui" \
   -H "Content-Type: application/json" \
   -d '{
     "site": "exemplo.com",
@@ -145,28 +152,6 @@ curl -X POST http://servidor:8090/api/master/files \
 ```
 
 Quando `removeafterget=yes`, as contas utilizadas são apagadas de todos os arquivos onde forem encontradas.
-
-### Autenticação com API Key
-
-A API key é **gerada automaticamente na primeira inicialização** e salva em `data/api.key`. Ela é **obrigatória** para fazer requisições à API — sem ela, o sistema não funciona.
-
-```bash
-# A key é gerada automaticamente ao iniciar
-./sulphurog
-
-# Saída esperada:
-# API key gerada na primeira inicialização - salva em data/api.key
-# [hash de 64 caracteres]
-```
-
-Para usar em requisições, inclua o header `X-API-Key`:
-
-```bash
-curl -X POST http://servidor:8090/api/master/files \
-  -H "X-API-Key: sua_api_key_aqui" \
-  -H "Content-Type: application/json" \
-  -d '{"site": "exemplo.com", "file_type": "txt", "removeafterget": "yes"}'
-```
 
 Se precisar regenerar a key, basta deletar o arquivo `data/api.key` e reiniciar o sistema.
 
@@ -216,15 +201,6 @@ data/output/
         ├── 1/Chrome_Default.txt
         └── 2/Firefox_Default.txt
 ```
-
-## Variáveis de ambiente
-
-| Variável | Descrição |
-|----------|-----------|
-| `TG_API_ID` | ID da app Telegram |
-| `TG_API_HASH` | Hash da app Telegram |
-| `TG_PHONE` | Número com DDI (+55...) |
-| `API_KEY` | Chave de autenticação da API |
 
 ## Stack
 

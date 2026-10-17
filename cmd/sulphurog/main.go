@@ -148,7 +148,6 @@ func main() {
 	}
 
 	// --- Use Cases ---
-	manageGroupsUC := usecase.NewManageGroupsUseCase(groupRepo, tg, trackerSvc)
 	processFileUC := usecase.NewProcessFileUseCase(tg, zipExt, stealerParser, artifactStorage, trackerSvc, hashSvc, cfg.Processing.TempDir, cfg.Processing.ProcessCookies, log)
 	_ = sevenZExt
 	_ = detector
@@ -158,12 +157,18 @@ func main() {
 	go monitorUC.Run(context.Background())
 
 	// --- API ---
+	// Gerar ou carregar API key (primeira inicialização gera uma nova)
 	apiKey := cfg.API.APIKey
 	if apiKey == "" {
 		apiKey = os.Getenv("API_KEY")
 	}
 	if apiKey == "" {
-		apiKey = "dev-key-change-me"
+		generated, err := api.LoadOrCreateAPIKey("data/api.key")
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to load or create API key")
+		}
+		apiKey = generated
+		log.Info().Str("api_key", apiKey).Msg("API key gerada na primeira inicialização - salva em data/api.key")
 	}
 
 	app := fiber.New(fiber.Config{
@@ -180,18 +185,6 @@ func main() {
 	})
 
 	app.Use(api.APIKeyAuth(apiKey))
-
-	// Groups CRUD (apenas leitura)
-	groupsHandler := api.NewGroupsHandler(manageGroupsUC)
-	groupsHandler.RegisterRoutes(app)
-
-	// Status
-	statusHandler := api.NewStatusHandler(manageGroupsUC, trackerSvc)
-	statusHandler.RegisterRoutes(app)
-
-	// Monitor control
-	monitorCtrl := api.NewMonitorController()
-	monitorCtrl.RegisterRoutes(app)
 
 	// Super rota mestre para manipulação de arquivos locais
 	masterHandler := api.NewMasterRouteHandler(artifactStorage)
