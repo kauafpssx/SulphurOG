@@ -37,6 +37,9 @@ func main() {
 					addGroupCLI(identifier, name)
 					os.Exit(0)
 				}
+			case "--refresh":
+				refreshGroupsCLI()
+				os.Exit(0)
 			}
 		}
 	}
@@ -242,4 +245,40 @@ func addGroupCLI(identifier, name string) {
 	fmt.Printf("  ID:         %s\n", group.ID)
 	fmt.Printf("  Identifier: %s\n", group.Identifier)
 	fmt.Printf("  Name:       %s\n", group.Name)
+}
+
+// refreshGroupsCLI redefine todos os grupos como não validados, forçando o
+// monitor a revalidá-los no próximo ciclo (útil quando o Telegram acaba de
+// conectar ou o usuário acabou de aceitar convites de canais privados).
+func refreshGroupsCLI() {
+	repo, err := repository.NewJSONGroupRepo("data/groups.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao inicializar repositorio: %v\n", err)
+		os.Exit(1)
+	}
+
+	groups, err := repo.GetAll()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao buscar grupos: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(groups) == 0 {
+		fmt.Println("Nenhum grupo encontrado para refresh.")
+		return
+	}
+
+	refreshed := 0
+	for _, g := range groups {
+		if !g.Validated || g.ChannelID == 0 {
+			if err := repo.MarkUnvalidated(g.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "erro ao atualizar grupo %s: %v\n", g.ID, err)
+				continue
+			}
+			refreshed++
+		}
+	}
+
+	fmt.Printf("Refresh concluído: %d grupo(s) marcado(s) para revalidação.\n", refreshed)
+	fmt.Println("O monitor revalidará os grupos no próximo ciclo (até ~60s).")
 }

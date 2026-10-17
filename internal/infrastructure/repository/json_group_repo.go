@@ -149,3 +149,24 @@ func (r *JSONGroupRepository) Delete(id string) error {
 
 	return r.save()
 }
+
+// MarkUnvalidated redefine um grupo como não validado, forçando o monitor a
+// revalidá-lo no próximo ciclo.
+func (r *JSONGroupRepository) MarkUnvalidated(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	g, ok := r.groups[id]
+	if !ok {
+		return fmt.Errorf("group not found: %s", id)
+	}
+
+	g.Validated = false
+	g.ChannelID = 0
+	g.AccessHash = 0
+	g.Active = true
+	g.Dead = false
+	g.UpdatedAt = time.Now()
+
+	return r.save()
+}
