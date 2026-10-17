@@ -38,7 +38,10 @@ func main() {
 					os.Exit(0)
 				}
 			case "--refresh":
-				refreshGroupsCLI()
+				if err := refreshGroupsCLI(); err != nil {
+					fmt.Fprintf(os.Stderr, "%v\n", err)
+					os.Exit(1)
+				}
 				os.Exit(0)
 			}
 		}
@@ -124,6 +127,11 @@ func main() {
 		// Esperar um pouco pra conexao estabelecer
 		time.Sleep(3 * time.Second)
 		log.Info().Msg("telegram client started")
+
+		// Revalidar todos os grupos no startup (resolve canais recem-adicionados)
+		if err := refreshGroupsCLI(); err != nil {
+			log.Warn().Err(err).Msg("failed to refresh groups on startup")
+		}
 	} else {
 		log.Warn().Msg("telegram not configured, health checks will be limited")
 	}
@@ -250,22 +258,21 @@ func addGroupCLI(identifier, name string) {
 // refreshGroupsCLI redefine todos os grupos como não validados, forçando o
 // monitor a revalidá-los no próximo ciclo (útil quando o Telegram acaba de
 // conectar ou o usuário acabou de aceitar convites de canais privados).
-func refreshGroupsCLI() {
+// Retorna erro em vez de sair do programa, para permitir uso no startup.
+func refreshGroupsCLI() error {
 	repo, err := repository.NewJSONGroupRepo("data/groups.json")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao inicializar repositorio: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("erro ao inicializar repositorio: %w", err)
 	}
 
 	groups, err := repo.GetAll()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao buscar grupos: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("erro ao buscar grupos: %w", err)
 	}
 
 	if len(groups) == 0 {
 		fmt.Println("Nenhum grupo encontrado para refresh.")
-		return
+		return nil
 	}
 
 	refreshed := 0
@@ -281,4 +288,5 @@ func refreshGroupsCLI() {
 
 	fmt.Printf("Refresh concluído: %d grupo(s) marcado(s) para revalidação.\n", refreshed)
 	fmt.Println("O monitor revalidará os grupos no próximo ciclo (até ~60s).")
+	return nil
 }
