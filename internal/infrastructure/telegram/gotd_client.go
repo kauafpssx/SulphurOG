@@ -67,7 +67,8 @@ func NewGotdClient(apiID int, apiHash, phone, sessionFile string, threads, partS
 			c.mu.Lock()
 			c.waiting = isFloodWait(e.Err)
 			c.mu.Unlock()
-		})
+		}).
+		WithMaxRetries(20)
 
 	return c
 }
