@@ -10,7 +10,6 @@ services:
     command: /bin/sh -c "chmod +x /app/sulphurog && exec /app/sulphurog"
     volumes:
       - ./data:/app/data
-      - ./sulphurog:/app/sulphurog
     logging:
       driver: "json-file"
       options:
