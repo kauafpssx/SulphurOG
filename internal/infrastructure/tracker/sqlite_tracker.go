@@ -117,6 +117,11 @@ func (t *SQLiteTracker) IsDuplicateMessage(filename string, messageID int) (bool
 	return exists, err
 }
 
+// Load carrega todo o estado do banco (baixados, pendentes e grupos).
+func (t *SQLiteTracker) Load() (*domain.TrackerState, error) {
+	return t.GetState()
+}
+
 // GetState carrega todo o estado do banco (baixados, pendentes e grupos).
 func (t *SQLiteTracker) GetState() (*domain.TrackerState, error) {
 	state := &domain.TrackerState{
