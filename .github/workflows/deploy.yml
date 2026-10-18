@@ -43,7 +43,7 @@ jobs:
           $SCP docker-compose.yml Dockerfile $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP -r configs/ $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP -r internal/ $USER@$HOST:/home/ubuntu/SulphurOG/
-          $SCP cmd/ $USER@$HOST:/home/ubuntu/SulphurOG/
+          $SCP -r cmd/ $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP go.mod go.sum $USER@$HOST:/home/ubuntu/SulphurOG/
 
           $SSH "chmod +x /home/ubuntu/SulphurOG/sulphurog 2>/dev/null || true"
