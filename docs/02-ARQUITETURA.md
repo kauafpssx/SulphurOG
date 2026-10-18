@@ -63,6 +63,7 @@ type Tracker interface {
     MarkDownloaded(record FileRecord) error
     MarkFinished(contentHash, uploadedPath string, ulpCount int) error
     MarkFailed(contentHash, errMsg string) error
+    MarkPermanentFailed(contentHash, errMsg string) error
     GetPending(limit int) ([]PendingFile, error)
     AddPending(files []PendingFile) error
     RemovePending(sourceURL string) error
