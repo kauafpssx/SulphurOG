@@ -319,6 +319,26 @@ func (t *SQLiteTracker) MarkFailed(contentHash, errMsg string) error {
 	return nil
 }
 
+// MarkPermanentFailed marca o arquivo como falho permanente sem re-adicionar à fila de pending.
+// Usado para falhas que não se resolvem com retry (ex: extração falha, formato não suportado).
+func (t *SQLiteTracker) MarkPermanentFailed(contentHash, errMsg string) error {
+	now := formatTime(time.Now())
+	_, err := t.db.Exec(`UPDATE downloaded_files SET status = ?, error = ?, failed_at = ?, retries = ? WHERE content_hash = ?`,
+		domain.StatusFailed, errMsg, now, maxRetries, contentHash)
+	if err != nil {
+		// Se o registro não existe ainda, cria um mínimo
+		t.db.Exec(`INSERT OR IGNORE INTO downloaded_files (content_hash, status, error, failed_at, retries)
+			VALUES (?, ?, ?, ?, ?)`,
+			contentHash, domain.StatusFailed, errMsg, now, maxRetries)
+	}
+	// Atualiza stats do grupo
+	t.db.Exec(`UPDATE group_states SET total_failed = total_failed + 1
+		WHERE group_url = (SELECT group_id FROM downloaded_files WHERE content_hash = ?)`, contentHash)
+	// Garante que não está mais na fila de pending
+	t.db.Exec(`DELETE FROM pending_files WHERE source = (SELECT source FROM downloaded_files WHERE content_hash = ?)`, contentHash)
+	return err
+}
+
 func (t *SQLiteTracker) GetPending(limit int) ([]domain.PendingFile, error) {
 	if limit <= 0 {
 		limit = 100

@@ -36,7 +36,9 @@ type GotdClient struct {
 	threads       int
 	waiting       bool
 	mu            sync.RWMutex
+	connected     bool
 	ready         chan struct{}
+	reconnectFlag bool
 	fileLocations map[string]*tg.InputDocumentFileLocation
 	fileLocMu     sync.RWMutex
 }
@@ -73,27 +75,38 @@ func NewGotdClient(apiID int, apiHash, phone, sessionFile string, threads, partS
 }
 
 func (c *GotdClient) waitForReady(ctx context.Context) error {
-	// Captura o canal atual sob lock pra suportar reconnect
-	c.mu.RLock()
-	ready := c.ready
-	c.mu.RUnlock()
+	for attempts := 0; attempts < 3; attempts++ {
+		c.mu.Lock()
+		if c.connected {
+			c.mu.Unlock()
+			return nil
+		}
+		ready := c.ready
+		c.mu.Unlock()
 
-	select {
-	case <-ready:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("timeout waiting for telegram")
+		select {
+		case <-ready:
+			// Channel was closed (reconnect in progress), re-check connected flag
+			continue
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(30 * time.Second):
+			return fmt.Errorf("timeout waiting for telegram")
+		}
 	}
+	return fmt.Errorf("timeout waiting for telegram after retries")
 }
 
 // Connect estabelece conexão com Telegram. Pode ser chamado novamente após desconexão.
 func (c *GotdClient) Connect(ctx context.Context) error {
-	// Novo canal ready para cada tentativa de conexão
 	ready := make(chan struct{})
 	c.mu.Lock()
+	// Close old channel to unblock any waiters from previous connection
+	if c.ready != nil {
+		close(c.ready)
+	}
 	c.ready = ready
+	c.connected = false
 	c.mu.Unlock()
 
 	// Limpar cache de locations na reconexão
@@ -106,13 +119,15 @@ func (c *GotdClient) Connect(ctx context.Context) error {
 		SessionStorage: storage,
 	})
 
-	return client.Run(ctx, func(ctx context.Context) error {
+	err := client.Run(ctx, func(ctx context.Context) error {
 		c.mu.Lock()
 		c.client = client
 		c.api = client.API()
+		c.connected = true
 		c.mu.Unlock()
 
-		close(ready) // seguro: cada Run tem seu próprio ready
+		// Notifica que o cliente está pronto
+		close(ready)
 
 		status, err := client.Auth().Status(ctx)
 		if err == nil && status.Authorized {
@@ -124,13 +139,27 @@ func (c *GotdClient) Connect(ctx context.Context) error {
 		c.log.Info().Msg("telegram: authenticating...")
 		flow := auth.NewFlow(&terminalAuth{phone: c.phone}, auth.SendCodeOptions{})
 		if err := flow.Run(ctx, client.Auth()); err != nil {
+			c.mu.Lock()
+			c.connected = false
+			c.mu.Unlock()
 			return fmt.Errorf("auth: %w", err)
 		}
 		c.log.Info().Msg("telegram: authenticated")
 
 		<-ctx.Done()
+		c.mu.Lock()
+		c.connected = false
+		c.mu.Unlock()
 		return ctx.Err()
 	})
+
+	if err != nil {
+		c.mu.Lock()
+		c.connected = false
+		c.mu.Unlock()
+	}
+
+	return err
 }
 
 func (c *GotdClient) ResolveChannel(identifier string) (bool, int64, int64, error) {
@@ -300,9 +329,14 @@ func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, des
 		return 0, err
 	}
 
-	c.mu.RLock()
+	c.mu.Lock()
 	api := c.api
-	c.mu.RUnlock()
+	connected := c.connected
+	c.mu.Unlock()
+
+	if !connected {
+		return 0, fmt.Errorf("telegram not connected")
+	}
 
 	loc, ok := location.(*tg.InputDocumentFileLocation)
 	if !ok {
@@ -320,6 +354,11 @@ func (c *GotdClient) DownloadFile(ctx context.Context, location interface{}, des
 
 	_, err := c.dl.Download(api, loc).WithThreads(threads).ToPath(ctx, destPath)
 	if err != nil {
+		// Detectar falhas de RPC que indicam conexão corrompida
+		if IsRPCError(err) {
+			c.log.Warn().Err(err).Msg("RPC error detected, triggering reconnect")
+			c.TriggerReconnect()
+		}
 		return 0, err
 	}
 
@@ -410,7 +449,42 @@ func (c *GotdClient) GetFileLocation(cacheKey string) (interface{}, bool) {
 	return loc, ok
 }
 
-func (c *GotdClient) Disconnect() {}
+func (c *GotdClient) Disconnect() {
+	c.mu.Lock()
+	c.connected = false
+	c.mu.Unlock()
+}
+
+// IsConnected retorna true se o cliente está conectado ao Telegram.
+func (c *GotdClient) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected
+}
+
+// TriggerReconnect força uma reconexão no próximo ciclo de download.
+// Usado quando uma falha de RPC indica que a conexão pode estar corrompida.
+func (c *GotdClient) TriggerReconnect() {
+	c.mu.Lock()
+	c.connected = false
+	c.reconnectFlag = true
+	c.mu.Unlock()
+}
+
+// NeedsReconnect retorna true se uma reconexão foi solicitada.
+// O flag é limpo quando a reconexão é initiada.
+func (c *GotdClient) NeedsReconnect() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.reconnectFlag
+}
+
+// ClearReconnectFlag limpa a bandeira de reconexão.
+func (c *GotdClient) ClearReconnectFlag() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reconnectFlag = false
+}
 
 func (c *GotdClient) GetChannelStatus(ctx context.Context, identifier string) (bool, int, time.Time, error) {
 	active, channelID, accessHash, err := c.ResolveChannel(identifier)
@@ -540,6 +614,33 @@ func IsTransientDownloadError(err error) bool {
 		strings.Contains(s, "OFFSET_INVALID") ||
 		strings.Contains(s, "FLOOD_WAIT") ||
 		strings.Contains(s, "TIMEOUT")
+}
+
+// IsRPCError detecta erros de RPC que indicam uma conexão corrompida ou
+// instável, onde a reconexão é mais eficaz que simples retry.
+// Inclui erros de ACK timeout, connection reset, e retry limit reached.
+func IsRPCError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToUpper(err.Error())
+	rpcIndicators := []string{
+		"RETRY LIMIT REACHED",
+		"RETRYUNTILACK",
+		"RPCDOREQUEST",
+		"INVOKE POOL",
+		"GET NEXT CHUNK",
+		"CONNECTION RESET",
+		"CONNECTION CLOSED",
+		"EOF",
+		"TRANSPORT",
+	}
+	for _, indicator := range rpcIndicators {
+		if strings.Contains(s, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsChannelError detecta erros que indicam canal deletado/privado/inacessível.

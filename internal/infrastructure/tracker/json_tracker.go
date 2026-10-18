@@ -220,6 +220,45 @@ func (t *JSONTracker) MarkFailed(contentHash string, errMsg string) error {
 	return t.save()
 }
 
+// MarkPermanentFailed marca o arquivo como falho permanente sem re-adicionar à fila de pending.
+// Usado para falhas que não se resolvem com retry (ex: extração falha, formato não suportado).
+func (t *JSONTracker) MarkPermanentFailed(contentHash string, errMsg string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	record, exists := t.state.DownloadedFiles[contentHash]
+	if !exists {
+		// Cria registro mínimo se não existe
+		record = domain.FileRecord{
+			ContentHash: contentHash,
+			Status:      domain.StatusFailed,
+		}
+	}
+
+	now := time.Now()
+	record.Status = domain.StatusFailed
+	record.Error = errMsg
+	record.FailedAt = &now
+	record.Retries = 3 // Marca como excedido para evitar retry
+	t.state.DownloadedFiles[contentHash] = record
+
+	// Remove da fila de pending
+	for i, p := range t.state.Pending {
+		if p.Source == record.Source {
+			t.state.Pending = append(t.state.Pending[:i], t.state.Pending[i+1:]...)
+			break
+		}
+	}
+
+	// Atualizar stats do grupo
+	if group, ok := t.state.Groups[record.Group]; ok {
+		group.TotalFailed++
+		t.state.Groups[record.Group] = group
+	}
+
+	return t.save()
+}
+
 func (t *JSONTracker) GetPending(limit int) ([]domain.PendingFile, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

@@ -124,6 +124,12 @@ func main() {
 				if err != nil {
 					log.Error().Err(err).Dur("retry_in", backoff).Msg("telegram disconnected")
 				}
+				// Verifica se há solicitação de reconexão por falha de RPC
+				if tg.NeedsReconnect() {
+					log.Info().Msg("reconnect requested due to RPC error")
+					tg.ClearReconnectFlag()
+					backoff = 5 * time.Second
+				}
 				log.Warn().Dur("retry_in", backoff).Msg("telegram reconnecting...")
 				time.Sleep(backoff)
 				if backoff < 5*time.Minute {
@@ -214,7 +220,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		addr := fmt.Sprintf(":%d", cfg.API.Port)
+		addr := fmt.Sprintf("127.0.0.1:%d", cfg.API.Port)
 		log.Info().Str("addr", addr).Msg("listening")
 		if err := app.Listen(addr); err != nil {
 			log.Fatal().Err(err).Msg("server failed")
@@ -237,9 +243,36 @@ func customErrorHandler(log zerolog.Logger) fiber.ErrorHandler {
 		if e, ok := err.(*fiber.Error); ok {
 			code = e.Code
 		}
+
+		// Filtrar erros de scanners/bots que enviam payloads binários TLS para a porta.
+		// Não são bugs do app — apenas ruído de internet.
+		errMsg := err.Error()
+		if isScannerError(errMsg) {
+			// Loga como debug em vez de error
+			log.Debug().Str("remote", c.IP()).Msg("scanner request filtered")
+			return c.Status(code).JSON(fiber.Map{"error": "bad request"})
+		}
+
 		log.Error().Err(err).Int("status", code).Msg("request error")
 		return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 	}
+}
+
+// isScannerError detecta erros causados por scanners/bots que enviam payloads
+// binários não-HTTP para a porta (TLS, RocketMQ, etc).
+func isScannerError(errMsg string) bool {
+	scannerPatterns := []string{
+		"unsupported http request method",
+		"cannot find http request method",
+		"error when reading request headers",
+		"Buffer size=",
+	}
+	for _, pattern := range scannerPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 // addGroupCLI adiciona um grupo via linha de comando (--addgroup identifier name).

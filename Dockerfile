@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends 7zip ca-certificates wget && \
+    apt-get install -y --no-install-recommends 7zip unrar-free ca-certificates wget && \
     ln -s /usr/bin/7zz /usr/local/bin/7z && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -r -u 1001 -d /app sulphurog

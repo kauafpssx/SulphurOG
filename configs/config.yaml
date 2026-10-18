@@ -14,7 +14,7 @@ processing:
   part_size_kb: 512
   max_retries: 3
   poll_interval: 30s
-  threads: 16
+  threads: 8
   process_cookies: true
   allowed_extensions:
     - .zip

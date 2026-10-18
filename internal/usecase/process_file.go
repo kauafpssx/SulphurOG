@@ -16,6 +16,7 @@ import (
 
 	"github.com/sulphurog/sulphurog/internal/domain"
 	"github.com/sulphurog/sulphurog/internal/infrastructure/extractor"
+	tgclient "github.com/sulphurog/sulphurog/internal/infrastructure/telegram"
 )
 
 type ProcessFileUseCase struct {
@@ -121,18 +122,18 @@ func (uc *ProcessFileUseCase) Execute(ctx context.Context, file domain.LogFile) 
 		header := make([]byte, 4096)
 		f, err := os.Open(destPath)
 		if err != nil {
-			return uc.failDownload(file.ContentHash, fmt.Errorf("open: %w", err))
+			return uc.failPermanent(file.ContentHash, fmt.Errorf("open: %w", err))
 		}
 		n, _ := f.Read(header)
 		f.Close()
 		if isULPContent(header[:n]) {
 			content, err := os.ReadFile(destPath)
 			if err != nil {
-				return uc.failDownload(file.ContentHash, fmt.Errorf("read: %w", err))
+				return uc.failPermanent(file.ContentHash, fmt.Errorf("read: %w", err))
 			}
 			return uc.processULP(ctx, file, content)
 		}
-		return uc.failDownload(file.ContentHash, fmt.Errorf("unsupported: %s", fileType))
+		return uc.failPermanent(file.ContentHash, fmt.Errorf("unsupported: %s", fileType))
 	}
 }
 
@@ -163,13 +164,28 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 
 	// Fix D: detectar split RAR (part01.rar, part02.rar, etc.) e pular
 	if splitRarPattern.MatchString(file.Filename) {
-		return uc.failDownload(file.ContentHash, fmt.Errorf("split RAR archive — needs all parts, skipping"))
+		return uc.failPermanent(file.ContentHash, fmt.Errorf("split RAR archive — needs all parts, skipping"))
 	}
 
 	// Fix E: validar magic bytes antes de extrair
 	fileType := uc.detectFileType(archivePath)
 	if fileType != "zip" && fileType != "rar" && fileType != "7z" && fileType != "gz" {
-		return uc.failDownload(file.ContentHash, fmt.Errorf("invalid archive (magic bytes: %s)", fileType))
+		return uc.failPermanent(file.ContentHash, fmt.Errorf("invalid archive (magic bytes: %s)", fileType))
+	}
+
+	// Validar tamanho do arquivo antes de extrair
+	// Se o tamanho esperado não corresponder ao tamanho real, o arquivo está truncado
+	if file.FileSize > 0 {
+		stat, err := os.Stat(archivePath)
+		if err != nil {
+			return uc.failPermanent(file.ContentHash, fmt.Errorf("stat archive: %w", err))
+		}
+		// Tolerância de 1% para diferenças de tamanho (Telegram pode reportar tamanho ligeiramente diferente)
+		tolerance := int64(float64(file.FileSize) * 0.01)
+		if stat.Size() < file.FileSize-tolerance {
+			return uc.failPermanent(file.ContentHash, fmt.Errorf("archive truncated: got %d bytes, expected %d (tolerance %d)",
+				stat.Size(), file.FileSize, tolerance))
+		}
 	}
 
 	ts := time.Now().Format("150405")
@@ -182,7 +198,7 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 
 	log.Info().Msg("extracting...")
 	if err := extractor.ExtractToTemp(archivePath, file.Password, extractDir); err != nil {
-		return uc.failDownload(file.ContentHash, fmt.Errorf("7z failed: %w", err))
+		return uc.failPermanent(file.ContentHash, fmt.Errorf("extraction failed: %w", err))
 	}
 	log.Info().Msg("extraction done, scanning files...")
 
@@ -241,7 +257,7 @@ func (uc *ProcessFileUseCase) processStealer(ctx context.Context, file domain.Lo
 	log.Info().Int("scanned", filesScanned).Int("ulps", len(allULPs)).Int("victims", victimIdx).Msg("parsing done")
 
 	if len(allULPs) == 0 {
-		return uc.failDownload(file.ContentHash, fmt.Errorf("no ULPs found"))
+		return uc.failPermanent(file.ContentHash, fmt.Errorf("no ULPs found"))
 	}
 
 	// Montar ulp.txt no staging (deduplicado)
@@ -369,6 +385,15 @@ func (uc *ProcessFileUseCase) failDownload(contentHash string, err error) error 
 	return err
 }
 
+// failPermanent marca o arquivo como falho permanente sem retry.
+// Usado para erros que não se resolvem com nova tentativa:
+// falha de extração, formato não suportado, arquivo truncado, etc.
+func (uc *ProcessFileUseCase) failPermanent(contentHash string, err error) error {
+	uc.log.Error().Err(err).Str("hash", contentHash).Msg("permanent failure — no retry")
+	uc.tracker.MarkPermanentFailed(contentHash, err.Error())
+	return err
+}
+
 func (uc *ProcessFileUseCase) detectFileType(filePath string) string {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -423,6 +448,7 @@ func deduplicateLines(content string) string {
 
 // optimalThreads retorna número ideal de threads baseado no tamanho do arquivo.
 // Arquivos pequenos usam menos threads (menos overhead).
+// Máximo de 8 threads para evitar retryUntilAck em rede instável.
 func (uc *ProcessFileUseCase) optimalThreads(fileSize int64) int {
 	switch {
 	case fileSize < 50*1024*1024: // <50MB
@@ -430,7 +456,7 @@ func (uc *ProcessFileUseCase) optimalThreads(fileSize int64) int {
 	case fileSize < 200*1024*1024: // <200MB
 		return 8
 	default: // >=200MB
-		return 16
+		return 8
 	}
 }
 
@@ -511,6 +537,7 @@ func dirSize(path string) int64 {
 
 // downloadWithRetry tenta baixar um arquivo com retry e backoff exponencial
 // para lidar com rate limiting (FLOOD_WAIT) do Telegram.
+// Em caso de erro de RPC (conexão corrompida), tenta reconectar antes de retentar.
 func (uc *ProcessFileUseCase) downloadWithRetry(ctx context.Context, file domain.LogFile, destPath string, threads, maxRetries int) (int64, error) {
 	var lastErr error
 	backoff := 5 * time.Second
@@ -528,6 +555,27 @@ func (uc *ProcessFileUseCase) downloadWithRetry(ctx context.Context, file domain
 		}
 
 		lastErr = err
+
+		// Detectar erro de RPC que indica conexão corrompida
+		// Nesse caso, forçar reconexão e aguardar antes de retentar
+		if tgclient.IsRPCError(err) {
+			uc.log.Warn().Err(err).Msg("RPC error detected, will attempt reconnection")
+			if tgClient, ok := uc.telegram.(interface {
+				TriggerReconnect()
+				IsConnected() bool
+			}); ok {
+				tgClient.TriggerReconnect()
+				// Aguardar reconexão
+				for i := 0; i < 6; i++ {
+					time.Sleep(5 * time.Second)
+					if tgClient.IsConnected() {
+						uc.log.Info().Msg("reconnected successfully")
+						break
+					}
+				}
+			}
+		}
+
 		if attempt < maxRetries {
 			uc.log.Warn().
 				Str("file", file.Filename).

@@ -336,6 +336,13 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 		return false, nil
 	}
 
+	// Verifica se já falhou permanentemente (ex: extração falhou, formato não suportado)
+	if rec, err := uc.tracker.GetFileRecord(file.Source); err == nil && rec.Status == domain.StatusFailed {
+		uc.log.Warn().Str("file", file.Filename).Msg("permanently failed, skipping")
+		uc.tracker.RemovePending(file.Source)
+		return false, nil
+	}
+
 	// Verifica se excedeu limite de retries
 	if rec, err := uc.tracker.GetFileRecord(file.Source); err == nil && rec.Retries >= 3 {
 		uc.log.Warn().Str("file", file.Filename).Int("retries", rec.Retries).Msg("max retries exceeded, removing from queue")
