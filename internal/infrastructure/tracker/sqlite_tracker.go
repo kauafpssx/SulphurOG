@@ -117,6 +117,13 @@ func (t *SQLiteTracker) IsDuplicateMessage(filename string, messageID int) (bool
 	return exists, err
 }
 
+// GetState carrega todo o estado do banco (baixados, pendentes e grupos).
+func (t *SQLiteTracker) GetState() (*domain.TrackerState, error) {
+	state := &domain.TrackerState{
+		DownloadedFiles: make(map[string]domain.FileRecord),
+		Groups:          make(map[string]domain.GroupState),
+	}
+
 	rows, err := t.db.Query(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
 		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries
 		FROM downloaded_files`)
