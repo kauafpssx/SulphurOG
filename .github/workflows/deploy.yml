@@ -12,16 +12,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Validate Go build
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-
-      - name: Build Linux binary
-        run: |
+      - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -ldflags="-s -w" -o sulphurog ./cmd/sulphurog
+            go build -ldflags="-s -w" -o /dev/null ./cmd/sulphurog
 
       - name: Deploy to server
         env:
@@ -38,15 +36,19 @@ jobs:
           # Garante diretório no servidor
           $SSH "mkdir -p /home/ubuntu/SulphurOG/configs /home/ubuntu/SulphurOG/data"
 
-          # Para container antes de sobrescrever o binário (evita erro de permissão)
+          # Para container antes de sobrescrever arquivos
           $SSH "cd /home/ubuntu/SulphurOG && docker compose down || true"
 
+          # Envia fontes, Dockerfile, compose e configs
           $SCP docker-compose.yml Dockerfile $USER@$HOST:/home/ubuntu/SulphurOG/
           $SCP -r configs/ $USER@$HOST:/home/ubuntu/SulphurOG/
-          $SCP sulphurog $USER@$HOST:/home/ubuntu/SulphurOG/sulphurog
-          $SSH "chmod +x /home/ubuntu/SulphurOG/sulphurog"
+          $SCP -r internal/ $USER@$HOST:/home/ubuntu/SulphurOG/
+          $SCP cmd/ $USER@$HOST:/home/ubuntu/SulphurOG/
+          $SCP go.mod go.sum $USER@$HOST:/home/ubuntu/SulphurOG/
 
-          # Sobe (ou recria) container
+          $SSH "chmod +x /home/ubuntu/SulphurOG/sulphurog 2>/dev/null || true"
+
+          # Rebuild da imagem Docker (aplica unrar-free + threads: 16) e sobe
           $SSH "cd /home/ubuntu/SulphurOG && docker compose up -d --build"
 
           rm -f /tmp/deploy_key
