@@ -247,9 +247,10 @@ isFirstRun := groupState.LastMessageID == 0
 				Password:  f.Password,
 			})
 		} else {
-			if f.MessageID <= groupState.LastMessageID {
-				continue
-			}
+			// Não pular baseado apenas em MessageID: arquivos antigos podem
+			// não ter sido baixados em runs anteriores (ex: container reiniciado).
+			// O isDuplicate (via IsDuplicateMessage/IsDownloaded) já evita
+			// reprocessamento de arquivos já finalizados.
 			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID); dup {
 				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
 				continue
