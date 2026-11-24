@@ -220,7 +220,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		addr := fmt.Sprintf("127.0.0.1:%d", cfg.API.Port)
+		addr := fmt.Sprintf("0.0.0.0:%d", cfg.API.Port)
 		log.Info().Str("addr", addr).Msg("listening")
 		if err := app.Listen(addr); err != nil {
 			log.Fatal().Err(err).Msg("server failed")
