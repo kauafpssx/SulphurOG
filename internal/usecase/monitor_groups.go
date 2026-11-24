@@ -429,7 +429,11 @@ func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize
 	// The source includes the channel and message ID; message IDs alone are not global.
 	if messageID > 0 {
 		record, err := uc.tracker.GetFileRecord(sourceURL)
-		return err == nil && (record.Status == domain.StatusFinished || record.Retries >= 3)
+		if err == nil && (record.Status == domain.StatusFinished || record.Retries >= 3) {
+			return true
+		}
+		pending, _ := uc.tracker.IsPending(sourceURL)
+		return pending
 	}
 	// Fallback para arquivos sem MessageID
 	if already, _ := uc.tracker.IsDownloaded(sourceURL); already {

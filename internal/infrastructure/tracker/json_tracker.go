@@ -284,6 +284,17 @@ func (t *JSONTracker) GetPending(limit int) ([]domain.PendingFile, error) {
 	return pending[:limit], nil
 }
 
+func (t *JSONTracker) IsPending(sourceURL string) (bool, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, pending := range t.state.Pending {
+		if pending.Source == sourceURL {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (t *JSONTracker) AddPending(files []domain.PendingFile) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

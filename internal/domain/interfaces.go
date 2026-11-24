@@ -53,6 +53,7 @@ type Tracker interface {
 	MarkFailed(contentHash string, errMsg string) error
 	MarkPermanentFailed(contentHash string, errMsg string) error
 	GetPending(limit int) ([]PendingFile, error)
+	IsPending(sourceURL string) (bool, error)
 	AddPending(files []PendingFile) error
 	RemovePending(sourceURL string) error
 	GetGroupState(groupURL string) (*GroupState, error)

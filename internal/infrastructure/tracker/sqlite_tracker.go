@@ -130,7 +130,7 @@ func (t *SQLiteTracker) GetState() (*domain.TrackerState, error) {
 	}
 
 	rows, err := t.db.Query(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
-		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries
+		COALESCE(downloaded_at, ''), COALESCE(download_done_at, ''), COALESCE(upload_start_at, ''), COALESCE(finished_at, ''), COALESCE(failed_at, ''), uploaded_to, ulp_count, error, password, retries
 		FROM downloaded_files`)
 	if err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ func (t *SQLiteTracker) GetFileRecord(contentHash string) (*domain.FileRecord, e
 	var r domain.FileRecord
 	var downloadedAt, downloadDoneAt, uploadStartAt, finishedAt, failedAt string
 	err := t.db.QueryRow(`SELECT content_hash, message_id, file_id, source, group_id, filename, file_size, type, status,
-		downloaded_at, download_done_at, upload_start_at, finished_at, failed_at, uploaded_to, ulp_count, error, password, retries
+		COALESCE(downloaded_at, ''), COALESCE(download_done_at, ''), COALESCE(upload_start_at, ''), COALESCE(finished_at, ''), COALESCE(failed_at, ''), uploaded_to, ulp_count, error, password, retries
 		FROM downloaded_files WHERE content_hash = ?`, contentHash).
 		Scan(&r.ContentHash, &r.MessageID, &r.FileID, &r.Source, &r.Group, &r.Filename, &r.FileSize,
 			&r.Type, &r.Status, &downloadedAt, &downloadDoneAt, &uploadStartAt, &finishedAt, &failedAt,
@@ -373,6 +373,12 @@ func (t *SQLiteTracker) GetPending(limit int) ([]domain.PendingFile, error) {
 		result = append(result, p)
 	}
 	return result, nil
+}
+
+func (t *SQLiteTracker) IsPending(sourceURL string) (bool, error) {
+	var exists bool
+	err := t.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pending_files WHERE source = ?)`, sourceURL).Scan(&exists)
+	return exists, err
 }
 
 func (t *SQLiteTracker) AddPending(files []domain.PendingFile) error {
