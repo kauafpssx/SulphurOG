@@ -1,254 +1,132 @@
 # SulphurOG
 
-Monitora canais do Telegram, baixa logs de stealer, extrai credenciais e salva localmente em arquivos no host.
+**A Telegram archive monitor that turns supported log files into searchable local output.**
 
-## Instalação
+SulphurOG watches configured Telegram channels with a user account, queues new archives, downloads them one at a time, extracts them, parses text records, and writes results under `data/output/`. Its HTTP API searches saved ULP text by site.
 
-### Pré-requisitos
+> [!IMPORTANT]
+> Output can contain credentials and cookies. Keep `data/`, `.env`, and the API key private. Docker publishes port `8090` on the host; restrict access with your cloud firewall or a trusted network.
 
-- **Go 1.21+** — binário estático, CGO_ENABLED=0
-- **7-Zip** — extração de ZIP/RAR/7z com senha
-- **Docker** — runtime no servidor (opcional)
+## ✨ What it does
 
-### Instalação manual
+| Stage | Behavior |
+| --- | --- |
+| Discover | Scans active Telegram groups for recent files and advances through older history. |
+| Queue | Stores eligible files in SQLite and recognizes files already queued or processed by channel and message. |
+| Process | Downloads one file at a time, up to **three per cycle**. Accepts `.zip`, `.rar`, `.7z`, `.gz`, and `.txt` when enabled. |
+| Extract | Uses 7-Zip for archives, including password-protected files. The Docker image includes the RAR codec. |
+| Save | Writes parsed `ulp.txt` and, when enabled and present, `cookies.zip` to a timestamped local folder. |
+
+The monitor checks for new posts on each cycle. Older files remain in the persistent queue while newer files are processed first. Files with the same name in different messages are separate files. A group can be configured to skip files without a password.
+
+## 🚀 Quick start with Docker
+
+### Requirements
+
+- Docker with Compose
+- A Telegram account and API ID/hash from [my.telegram.org](https://my.telegram.org)
+- Go **1.26.3** to build the Linux binary locally
 
 ```bash
-# Clonar o repositório
 git clone https://github.com/kauafpssx/SulphurOG.git
 cd SulphurOG
-
-# Instalar dependências
-go mod download
-
-# Build
-make build-linux
-
-# Copiar o binário
-cp bin/sulphurog-linux /usr/local/bin/sulphurog
-```
-
-### Instalação via Docker
-
-```bash
-# Configurar variáveis de ambiente
 cp .env.example .env
-nano .env
-
-# Subir
+# Fill in TG_API_ID, TG_API_HASH, and TG_PHONE in .env.
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sulphurog ./cmd/sulphurog
 docker compose up -d --build
 docker compose logs -f
 ```
 
-### Configuração do Telegram
+The Dockerfile copies a **prebuilt Linux AMD64 binary** named `sulphurog` from the repository root. Build it before running Compose. The image installs 7-Zip with RAR support.
 
-Na primeira execução o app pede o código de verificação do Telegram no terminal:
+### Telegram sign-in
 
-1. Acesse [my.telegram.org](https://my.telegram.org) → API development tools
-2. Crie um app e anote `api_id` e `api_hash`
-3. Configure no `.env`
-
-#### Autenticação via Docker (container interativo)
+The first connection may require a Telegram verification code. Start the container interactively once, using the same `data/` volume as Compose:
 
 ```bash
-# Corrigir permissões do diretório de dados
-sudo chown -R 1001:1001 data/
-
-# Gerar a sessão do Telegram (container interativo)
-docker run -it --rm \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/configs:/app/configs \
-  -e TG_API_ID="SEU_API_ID" \
-  -e TG_API_HASH="SEU_API_HASH" \
-  -e TG_PHONE="+55..." \
-  sulphurog-sulphurog /app/sulphurog
+docker compose run --rm sulphurog
 ```
 
-O sistema vai:
-1. Conectar ao Telegram
-2. Enviar código de verificação para seu celular/email
-3. Pedir o código no terminal (digite e pressione Enter)
-4. Salvar a sessão em `data/session.json`
-
-Após autenticado, use `Ctrl+C` para sair.
-
-#### Reiniciar com a sessão salva
+Enter the code when prompted. The session is saved to `data/session.json`. Stop the interactive run with `Ctrl+C`, then start the service normally:
 
 ```bash
 docker compose up -d
 ```
 
-O container agora usará a sessão existente e não pedirá código novamente.
+When `API_KEY` is unset, the app generates a key on first start and stores it in `data/api.key`. You may set `API_KEY` in `.env` instead. Do not share either value.
 
-### Primeira inicialização
+## ⚙️ Configuration
 
-Na primeira execução, o sistema gera automaticamente uma API key aleatória e a salva em `data/api.key`. Essa key é **obrigatória** para fazer requisições à rota mestre e demais endpoints da API.
+The app reads `configs/config.yaml` and expands Telegram and API values from `.env`.
 
-```bash
-# Inicializar o sistema
-./sulphurog
+| Setting | Default in this repository | Purpose |
+| --- | --- | --- |
+| `api.port` | `8090` | HTTP port published by Compose. |
+| `telegram.session_file` | `data/session.json` | Saved Telegram login. |
+| `processing.temp_dir` | `/tmp/sulphurog` | Working directory for downloads and extraction. |
+| `processing.process_cookies` | `true` | Save parsed cookies in a ZIP. |
+| `processing.allowed_extensions` | ZIP, RAR, 7z, GZ, TXT | File types eligible for the queue. |
+| `storage.output_dir` | `data/output` | Local results. |
 
-# A API key será exibida no log e salva em data/api.key
-# Exemplo: "API key gerada na primeira inicialização - salva em data/api.key"
-```
-
-## O que faz
-
-- Conecta em canais via MTProto (conta real, sem bot)
-- Detecta arquivos novos a cada ciclo, enfileira e processa 10 por vez
-- Baixa ZIP/RAR/7z com senha, extrai no disco com 7z, lê `.txt` um por um
-- Parseia três formatos de log: ULP simples (`URL:login:senha`), YAML e Key-Value
-- Agrupa cookies por vítima, salva `ulp.txt` + `cookies.zip` localmente
-- Divide arquivos ULP acima de 49MB automaticamente
-- Filtra extensões: só processa `.zip`, `.rar`, `.7z`, `.gz`, `.txt` (configurável)
-- Remove cookies grandes automaticamente para caber em 49MB antes de zipar
-- Auto-cleanup do temp dir no startup (previne acumulo após crash)
-- Valida grupos a cada 10 ciclos, mata grupos mortos e limpa a fila
-- Deduplica por source URL e por `(filename, filesize)`
-- Reconnect automático com backoff exponencial (30s → 5min)
-- Download paralelo dinâmico: <50MB=4 threads, <200MB=8, ≥200MB=16
-- FLOOD_WAIT: pula grupo no ciclo atual ao invés de retry (evita penalidades maiores)
-- Remove pastas de cookies órfãs em batch (log único ao invés de 400+ linhas)
-- Suporte a invite links (`https://t.me/+hash`) para grupos privados
-
-## Arquitetura
-
-Clean Architecture: `domain` → `usecase` → `infrastructure`.
-
-```
-Telegram MTProto (gotd/td)
-     ↓
-MonitorGroups — ciclo: scan grupos → enfileira → processa 10 arquivos
-     ↓
-ProcessFile — download (4-16 threads dinâmicas) → detecta tipo (4 bytes) → extração 7z → parse → upload local
-     ↓
-Storage local (data/output)
-```
-
-Estado persistido em SQLite (WAL). Grupos em `data/groups.json`. Sessão Telegram em `data/session.json`. API key em `data/api.key`.
-
-## Gerenciamento de Grupos
-
-Os grupos são gerenciados **exclusivamente via linha de comando**. As rotas HTTP de criação/atualização/exclusão foram removidas.
-
-### Adicionar grupo
+Manage groups from the project directory, where `data/` and `configs/` are available:
 
 ```bash
-./sulphurog --addgroup "https://t.me/NomeDoCanal" "Nome Amigável"
-```
-
-Aceita username (`https://t.me/canal`), invite link (`https://t.me/+hash`) e ID numérico.
-
-### Revalidar grupos existentes
-
-Use quando o Telegram acaba de conectar ou você acabou de aceitar convites de canais privados:
-
-```bash
+./sulphurog --addgroup "https://t.me/channelname" "Display name"
 ./sulphurog --refresh
 ```
 
-Isso redefine todos os grupos como não validados, forçando o monitor a revalidá-los no próximo ciclo (até ~60s).
+`--refresh` marks saved groups for revalidation on the next monitor cycle.
 
-## API REST
+## 📂 Files and state
 
-A API possui apenas duas rotas: `/api/health` (público) e `/api/master/files` (requer autenticação).
-
-Todas as requisições à `/api/master/files` exigem o header `X-API-Key` com a key gerada automaticamente.
-
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| `GET` | `/api/health` | Status do servidor (público) |
-| `POST` | `/api/master/files` | Super rota para manipulação de arquivos locais |
-
-### Autenticação
-
-A API key é **gerada automaticamente na primeira inicialização** e salva em `data/api.key`. Ela é **obrigatória** para a rota mestre — sem ela, o sistema não funciona.
-
-```bash
-# A key é gerada automaticamente ao iniciar
-./sulphurog
-
-# Saída esperada:
-# API key gerada na primeira inicialização - salva em data/api.key
+```text
+data/
+├── api.key                 # Generated API key, unless API_KEY is set
+├── groups.json             # Configured groups
+├── session.json            # Telegram session
+├── sulphurog.db            # Queue and processing history
+└── output/
+    └── 2026-11-24_14-39-22/
+        ├── ulp.txt         # Parsed URL:login:password lines
+        └── cookies.zip     # Present when cookies were found and enabled
 ```
 
-### Super rota mestre: `/api/master/files`
+Keep `sulphurog.db` and `output/` together across deployments. Removing the database resets the queue and processed-file history, so the monitor may download old files again. Compose mounts `./data` into the container, preserving it when the container is rebuilt.
 
-Recebe requisições POST com os parâmetros do site, tipo de arquivo e opção de remoção.
+## 🔌 HTTP API
 
-**Parâmetros:**
-- `site` (obrigatório): site para buscar contas
-- `file_type`: `txt` ou `cookies` (padrão: `txt`)
-- `removeafterget`: `yes` ou `no` (padrão: `no`)
+The server listens on port `8090` by default. `GET /api/health` is public. `POST /api/master/files` requires `X-API-Key`.
 
-**Exemplo:**
 ```bash
-curl -X POST http://servidor:8090/api/master/files \
-  -H "X-API-Key: sua_api_key_aqui" \
+curl http://localhost:8090/api/health
+
+curl -X POST http://localhost:8090/api/master/files \
+  -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "site": "exemplo.com",
-    "file_type": "txt",
-    "removeafterget": "yes"
-  }'
+  -d '{"site":"example.com","file_type":"txt"}'
 ```
 
-Quando `removeafterget=yes`, as contas utilizadas são apagadas de todos os arquivos onde forem encontradas.
+The master route searches saved `.txt` files for lines containing `site` and returns matching URL, login, and password fields as JSON. `file_type` defaults to `txt`. Set `removeafterget` to `yes` **only if you intend to delete matching lines from the saved text files**; the default leaves them intact.
 
-Se precisar regenerar a key, basta deletar o arquivo `data/api.key` e reiniciar o sistema.
+> [!NOTE]
+> The `cookies` request value currently scans `.txt` files too. It does not search inside the generated `cookies.zip` files.
 
-## Config.yaml
+## 🧭 How it is organized
 
-```yaml
-api:
-  port: 8090
-  api_key: ${API_KEY}
-
-telegram:
-  api_id: ${TG_API_ID}
-  api_hash: ${TG_API_HASH}
-  phone: ${TG_PHONE}
-  session_file: data/session.json
-  channels: []
-
-processing:
-  temp_dir: /tmp/sulphurog
-  part_size_kb: 512
-  max_retries: 3
-  poll_interval: 30s
-  threads: 16                     # fallback; dinâmico: <50MB=4, <200MB=8, ≥200MB=16
-  process_cookies: true           # false para ignorar cookies
-  allowed_extensions:             # extensões aceitas
-    - .zip
-    - .rar
-    - .7z
-    - .gz
-    - .txt
-
-storage:
-  output_dir: data/output
-
-logging:
-  level: info
+```text
+cmd/sulphurog/                   Entry point and configuration
+internal/domain/                 Data types and interfaces
+internal/usecase/                Group monitoring and file processing
+internal/infrastructure/telegram Telegram MTProto client
+internal/infrastructure/tracker  SQLite queue and history
+internal/infrastructure/extractor Archive handling
+internal/infrastructure/api/     HTTP routes
 ```
 
-## Estrutura de armazenamento local
+The runtime uses Go, [gotd/td](https://github.com/gotd/td), Fiber, SQLite, and 7-Zip. GitHub Actions builds the Linux AMD64 binary, copies it and the Docker files to the server, then rebuilds the Compose service on pushes to `main`.
 
+## 🧪 Local checks
+
+```bash
+go test ./...
 ```
-data/output/
-└── {YYYY-MM-DD_HH-MM-SS}/
-    ├── ulp.txt          ← URL:Login:Senha
-    ├── ulp-2.txt        ← split acima de 49MB
-    └── cookies.zip
-        ├── 1/Chrome_Default.txt
-        └── 2/Firefox_Default.txt
-```
-
-## Stack
-
-- **Go 1.21+** — binário estático, CGO_ENABLED=0
-- **gotd/td** — cliente MTProto nativo
-- **Fiber v2** — API REST
-- **SQLite** (modernc, pure Go) — tracker de estado com WAL
-- **7zip** — extração de ZIP/RAR/7z com senha
-- **Docker** — runtime no servidor (Oracle Cloud Free Tier, 1GB RAM)
-- **GitHub Actions** — CI/CD: build Linux → SCP → docker compose up
