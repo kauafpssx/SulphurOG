@@ -185,7 +185,6 @@ func (uc *MonitorGroupsUseCase) enqueueGroup(ctx context.Context, group domain.G
 
 	var pending []domain.PendingFile
 	skipped := 0
-isFirstRun := groupState.LastMessageID == 0
 
 	// Busca as 50 mensagens mais recentes do grupo (aumentado de 10 para 50
 	// para pegar arquivos em mensagens mais antigas em canais com poucas postagens)
@@ -215,6 +214,42 @@ isFirstRun := groupState.LastMessageID == 0
 	groupState.FloodWaitUntil = time.Time{}
 	groupState.ConsecFails = 0
 	log.Info().Int("count", len(recentFiles)).Msg("recent files found")
+	// Fetch every new page until the previous high-water mark is reached.
+	if groupState.LastMessageID > 0 {
+		page := recentFiles
+		for len(page) == 50 && page[len(page)-1].MessageID > groupState.LastMessageID {
+			older, scanErr := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 50, page[len(page)-1].MessageID)
+			if scanErr != nil {
+				log.Warn().Err(scanErr).Msg("new message scan failed")
+				return false
+			}
+			if len(older) == 0 {
+				break
+			}
+			recentFiles = append(recentFiles, older...)
+			page = older
+		}
+	}
+	newestID := groupState.LastMessageID
+	if len(recentFiles) > 0 && recentFiles[0].MessageID > newestID {
+		newestID = recentFiles[0].MessageID
+	}
+	// Walk older history one page per cycle, independently of new posts.
+	oldestID := groupState.OldestMessageID
+	if oldestID == 0 && len(recentFiles) > 0 {
+		oldestID = recentFiles[len(recentFiles)-1].MessageID
+	}
+	if oldestID > 0 {
+		older, scanErr := uc.telegram.ListFiles(ctx, group.ChannelID, group.AccessHash, 50, oldestID)
+		if scanErr != nil {
+			log.Warn().Err(scanErr).Msg("historical scan failed")
+			return false
+		}
+		if len(older) > 0 {
+			oldestID = older[len(older)-1].MessageID
+			recentFiles = append(recentFiles, older...)
+		}
+	}
 
 	for _, f := range recentFiles {
 		// Filtros
@@ -227,54 +262,22 @@ isFirstRun := groupState.LastMessageID == 0
 			continue
 		}
 
-		// Primeiro run: adiciona todos (marca posição, não perde nada)
-		// Runs seguintes: só novos (mais recentes que último visto)
-		if isFirstRun {
-			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID); dup {
-				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
-				continue
-			}
-			log.Info().Str("file", f.Filename).Msg("new file found")
-			pending = append(pending, domain.PendingFile{
-				MessageID: f.MessageID,
-				FileID:    f.FileID,
-				Source:    f.SourceURL,
-				Group:     group.Identifier,
-				Filename:  f.Filename,
-				FileSize:  f.FileSize,
-				Date:      f.Date,
-				Priority:  1,
-				Password:  f.Password,
-			})
-		} else {
-			// Não pular baseado apenas em MessageID: arquivos antigos podem
-			// não ter sido baixados em runs anteriores (ex: container reiniciado).
-			// O isDuplicate (via IsDuplicateMessage/IsDownloaded) já evita
-			// reprocessamento de arquivos já finalizados.
-			if dup := uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID); dup {
-				log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
-				continue
-			}
-			log.Info().Str("file", f.Filename).Msg("new file found")
-			pending = append(pending, domain.PendingFile{
-				MessageID: f.MessageID,
-				FileID:    f.FileID,
-				Source:    f.SourceURL,
-				Group:     group.Identifier,
-				Filename:  f.Filename,
-				FileSize:  f.FileSize,
-				Date:      f.Date,
-				Priority:  1,
-				Password:  f.Password,
-			})
+		if uc.isDuplicate(f.SourceURL, f.Filename, f.FileSize, f.MessageID) {
+			log.Debug().Str("file", f.Filename).Msg("duplicate skipped")
+			continue
 		}
-	}
-
-	// Atualiza LastMessageID com o ID mais alto retornado
-	for _, f := range recentFiles {
-		if f.MessageID > groupState.LastMessageID {
-			groupState.LastMessageID = f.MessageID
-		}
+		log.Info().Str("file", f.Filename).Msg("new file found")
+		pending = append(pending, domain.PendingFile{
+			MessageID: f.MessageID,
+			FileID:    f.FileID,
+			Source:    f.SourceURL,
+			Group:     group.Identifier,
+			Filename:  f.Filename,
+			FileSize:  f.FileSize,
+			Date:      f.Date,
+			Priority:  1,
+			Password:  f.Password,
+		})
 	}
 
 	if skipped > 0 {
@@ -284,11 +287,14 @@ isFirstRun := groupState.LastMessageID == 0
 	if len(pending) > 0 {
 		if err := uc.tracker.AddPending(pending); err != nil {
 			log.Error().Err(err).Msg("failed to add pending")
+			return false
 		} else {
 			log.Info().Int("count", len(pending)).Msg("files added to queue")
 		}
 	}
 
+	groupState.LastMessageID = newestID
+	groupState.OldestMessageID = oldestID
 	uc.tracker.UpdateGroupState(group.Identifier, *groupState)
 	return false
 }
@@ -420,13 +426,10 @@ func (uc *MonitorGroupsUseCase) processNextFile(ctx context.Context) (queueEmpty
 // Usa MessageID como identificador único principal (arquivos em grupos de logs
 // podem ter o mesmo nome, mas MessageIDs diferentes).
 func (uc *MonitorGroupsUseCase) isDuplicate(sourceURL, filename string, fileSize int64, messageID int) bool {
-	// Se temos MessageID, usamos ele como identificador principal
-	// (arquivos em grupos de logs têm o mesmo nome mas MessageIDs únicos)
+	// The source includes the channel and message ID; message IDs alone are not global.
 	if messageID > 0 {
-		if dup, _ := uc.tracker.IsDuplicateMessage(filename, messageID); dup {
-			return true
-		}
-		return false
+		record, err := uc.tracker.GetFileRecord(sourceURL)
+		return err == nil && (record.Status == domain.StatusFinished || record.Retries >= 3)
 	}
 	// Fallback para arquivos sem MessageID
 	if already, _ := uc.tracker.IsDownloaded(sourceURL); already {

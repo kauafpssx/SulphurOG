@@ -1,8 +1,9 @@
 FROM debian:bookworm-slim
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends 7zip unrar-free ca-certificates wget && \
-    ln -s /usr/bin/7zz /usr/local/bin/7z && \
+RUN printf 'deb http://deb.debian.org/debian bookworm-backports main non-free\n' > /etc/apt/sources.list.d/backports.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates wget && \
+    apt-get install -y -t bookworm-backports --no-install-recommends 7zip 7zip-rar && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -r -u 1001 -d /app sulphurog
 
